@@ -1,11 +1,12 @@
 # Navi AI
 
-Navi is an always-listening voice assistant for Windows. Say **"Navi"** to wake it up, then ask for the weather, your unread mail, your Canvas homework, or switch into a Gemini-powered AI chat. It comes with a small chat window and a glowing status orb in the corner of your screen.
+Navi is an always-listening voice assistant for Windows and macOS. Say **"Navi"** to wake it up, then ask for the weather, your unread mail, your Canvas homework, or switch into a Gemini-powered AI chat. It comes with a small chat window and a glowing status orb in the corner of your screen.
 
 ## Requirements
 
-- **Windows 10 or 11.** Navi only runs on Windows. The status orb draws itself with Windows APIs (`ctypes.windll`), and the microphone library (PyAudioWPatch) is Windows-only. It will not start on macOS or Linux.
-- **Python 3.10 or newer** from [python.org](https://www.python.org/downloads/windows/). During install, tick "Add python.exe to PATH" and keep "tcl/tk and IDLE" selected (Navi's window needs tkinter).
+- **Windows 10/11 or macOS.** On Linux the window works but the status orb is turned off, and it hasn't been tested there.
+- **Python 3.10 or newer** from [python.org](https://www.python.org/downloads/). On Windows, tick "Add python.exe to PATH" and keep "tcl/tk and IDLE" selected during install (Navi's window needs tkinter). The python.org installer for Mac includes tkinter too.
+- **Mac only:** [Homebrew](https://brew.sh), to install PortAudio for the microphone.
 - A **microphone** and **speakers**.
 - An **internet connection**. Speech recognition, text to speech, the AI and every command go online.
 
@@ -21,13 +22,21 @@ Navi is an always-listening voice assistant for Windows. Say **"Navi"** to wake 
 2. (Recommended) Make a virtual environment so Navi's packages stay separate:
 
    ```powershell
+   # Windows
    python -m venv .venv
    .venv\Scripts\activate
    ```
 
-3. Install the dependencies:
+   ```bash
+   # macOS
+   python3 -m venv .venv
+   source .venv/bin/activate
+   ```
 
-   ```powershell
+3. Install the dependencies. On a Mac, install PortAudio first:
+
+   ```bash
+   brew install portaudio   # macOS only
    pip install -r requirements.txt
    ```
 
@@ -53,10 +62,12 @@ Keep these keys private. Don't commit a copy of `voice.py` with your real keys t
 ## Running Navi
 
 ```powershell
-python voice.py
+python voice.py      # use python3 on macOS
 ```
 
 The window opens and Navi starts listening right away.
+
+On a Mac, the first run asks for **Microphone** access for your terminal app; allow it. The orb also peeks at the screen behind it to adjust its colors, which needs **Screen Recording** access (System Settings > Privacy & Security). Without it everything still works and the orb just keeps its default colors.
 
 - Say **"Navi"** to wake it. It answers and waits for a command.
 - Commands: **"weather"**, **"mail"**, **"homework"** (or "canvas" / "assignment"), **"ai"**, **"restaurant"**.
@@ -64,7 +75,7 @@ The window opens and Navi starts listening right away.
 - Say **"goodbye"** to put Navi back to sleep.
 - You can also type a question in the box at the bottom and press **Ask**, or use the Weather / Check mail / Homework buttons.
 
-The orb in the bottom-right corner shows what Navi is doing: dark blue when asleep, bright blue when awake, green while thinking, and red/orange in AI mode.
+The orb in the bottom-right corner shows what Navi is doing: dark blue when asleep, bright blue when awake, green while thinking, and red/orange in AI mode. On Windows you can click straight through it; on a Mac it sits on top of whatever is in that corner.
 
 ### Run modes
 
@@ -76,8 +87,9 @@ The `test` variable at the top of `voice.py` picks how Navi runs:
 
 ## Troubleshooting
 
-- **`pip install` fails on PyAudioWPatch:** make sure you're on Windows with 64-bit Python 3.10+. Upgrade pip with `python -m pip install --upgrade pip` and try again.
-- **No sound / playsound error:** keep `playsound` at version 1.2.2, as pinned in `requirements.txt`. Version 1.3.0 is broken on Windows.
-- **Navi never hears you:** check that Windows lets apps use the microphone (Settings > Privacy & security > Microphone) and that the right mic is the default input device. Run with `test=1` to check.
+- **`pip install` fails on PyAudioWPatch (Windows):** make sure you have 64-bit Python 3.10+. Upgrade pip with `python -m pip install --upgrade pip` and try again.
+- **`pip install` fails on PyAudio (Mac):** run `brew install portaudio` first, then install again.
+- **No sound / playsound error (Windows):** keep `playsound` at version 1.2.2, as pinned in `requirements.txt`. Version 1.3.0 is broken on Windows.
+- **Navi never hears you:** check that apps are allowed to use the microphone (Windows: Settings > Privacy & security > Microphone; Mac: System Settings > Privacy & Security > Microphone, for your terminal app) and that the right mic is the default input device. Run with `test=1` to check.
 - **SSL / certificate errors:** Navi already uses the Windows certificate store through `truststore`, which fixes most antivirus HTTPS scanning issues (AVG, Avast).
 - **"I couldn't reach Canvas":** check `CANVAS_URL` and that your access token hasn't expired.
