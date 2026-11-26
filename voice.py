@@ -666,7 +666,7 @@ except ImportError:
     edge_tts=None
 SETTINGS_FILE=os.path.join(os.path.dirname(os.path.abspath(__file__)), "navi_settings.json")
 DEFAULT_SETTINGS={"voice": "google:com", "speed": 0, "pitch": 0, "volume": 100,
-                  "brief_on_start": True, "brief_on_wake": True, "wake_minutes": 5,
+                  "brief_on_start": True, "brief_on_wake": True, "wake_minutes": 5, "listen_pause": 2.0,
                   "city": "", "precise_location": True, "diet": [], "units": "C", "offline_wake": True, "voice_stop": True,
                   "phone_topic": "", "phone_when": "away", "phone_briefing": False,
                   "only_my_voice": False, "voice_fixes": True, "hf_token": "", "last_voice": "google:com",
@@ -821,7 +821,7 @@ def get_mic_input():
         rec.energy_threshold=profile["energy_threshold"]
     #there's no time limit: navi keeps listening as long as you talk, and stops after 2 seconds of quiet, so normal
     #pauses between words or thoughts don't cut you off (the default 0.8 did)
-    rec.pause_threshold=2.0
+    rec.pause_threshold=min(max(float(settings["listen_pause"]), 0.6), 5.0) #seconds of quiet that end what you're saying (settings > listening)
     rec.non_speaking_duration=0.5
     with sr.Microphone() as source:
         print("Listening...")
@@ -6284,6 +6284,9 @@ class SettingsWindow:
                    "phrase like \"hey navi\". When I think I heard it, that one short clip goes to Google to double-check, so "
                    "similar words don't wake me. After that your command goes to Google too, for better accuracy. Turn this "
                    "off to use Google for the wake word as well.")
+        self.slider("Wait after I stop", "listen_pause", 0.6, 5.0, 0.1)
+        self.label("How long I wait in silence before I decide you've finished talking. Longer lets you pause mid-sentence; "
+                   "shorter makes me answer faster.")
         self.check("Say \"stop\" to cut me off while I'm talking", "voice_stop")
         self.label("The Stop button in my main window always works too.")
         ready=os.path.isdir(VOSK_DIR)
@@ -6615,10 +6618,10 @@ class SettingsWindow:
         c=NaviGUI.COLORS
         row=tk.Frame(self.body, bg=c["bg"])
         value=tk.Label(row, width=7, anchor="w", font=(UI_FONT,10), fg=c["text"], bg=c["bg"])
-        unit={"speed": "%", "pitch": " Hz", "volume": "%"}[key]
+        unit={"speed": "%", "pitch": " Hz", "volume": "%", "listen_pause": " s"}[key]
         def moved(v):
-            v=int(float(v))
-            value.configure(text=(f"{v:+d}" if key!="volume" else str(v))+unit)
+            v=round(float(v), 1) if isinstance(settings[key], float) else int(float(v))
+            value.configure(text=(f"{v:.1f}" if isinstance(v, float) else f"{v:+d}" if key not in ("volume",) else str(v))+unit)
             self.set(key, v)
         scale=tk.Scale(row, from_=low, to=high, resolution=step, orient="horizontal", length=220, width=12,
                        sliderlength=18, showvalue=False, bg=c["accent"], troughcolor=c["panel"], activebackground=c["you"],
