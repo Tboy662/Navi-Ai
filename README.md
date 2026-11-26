@@ -44,20 +44,23 @@ Navi is an always-listening voice assistant for Windows and macOS. Say **"Navi"*
 
 ## Keys and accounts
 
-Navi reads its settings from variables near the top of `voice.py`, under `#variables`. Each feature needs its own key. If you leave one empty, the other features still work.
+Navi reads its keys from a `.env` file next to `voice.py`. Copy `.env.example` to `.env` and fill it in. Each feature needs its own key. If you leave one empty, the other features still work.
 
-| Variable | Used for | How to get it |
+| `.env` name | Used for | How to get it |
 | --- | --- | --- |
-| `ai_api_key` | The "ai" voice mode and questions typed in the window | Create a free Gemini API key at [Google AI Studio](https://aistudio.google.com/apikey). |
+| `GEMINI_API_KEY` | The "ai" voice mode and questions typed in the window | Create a free Gemini API key at [Google AI Studio](https://aistudio.google.com/apikey). |
 | `MAIL_USER` | The "mail" command | Your Gmail address. |
 | `MAIL_PASSWORD` | The "mail" command | A Gmail **app password**, not your normal password. Turn on 2-Step Verification, then create one at [myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords). IMAP must be enabled in Gmail settings. |
-| `CANVAS_URL` | The "homework" command | Your school's Canvas address, for example `yourschool.instructure.com`. Can also be set as the `CANVAS_URL` environment variable. |
-| `CANVAS_API_KEY` | The "homework" command | In Canvas go to Account > Settings > New Access Token. Can also be set as the `CANVAS_API_KEY` environment variable. |
-| `restaurant_api_key` | The "restaurant" command (work in progress) | A [Geoapify](https://www.geoapify.com/) API key. |
+| `IMAP_SERVER`, `IMAP_PORT` | The "mail" command | Optional. Default to `imap.gmail.com` and `993`. |
+| `CANVAS_URL` | The "homework" command | Your school's Canvas address, for example `yourschool.instructure.com`. |
+| `CANVAS_API_KEY` | The "homework" command | In Canvas go to Account > Settings > New Access Token. |
+| `GEOAPIFY_API_KEY` | The "restaurant" command (work in progress) | A [Geoapify](https://www.geoapify.com/) API key. |
+
+Real environment variables with the same names also work and take priority over `.env`.
 
 Weather needs no key. It currently reports New York; change the city in `get_weather()` if you want somewhere else.
 
-Keep these keys private. Don't commit a copy of `voice.py` with your real keys to a public repository.
+Keep these keys private. `.env` is in `.gitignore`, so it won't be committed. Never put real keys in `voice.py`.
 
 ## Running Navi
 
