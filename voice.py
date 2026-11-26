@@ -1,9 +1,7 @@
 #import/setup
 import truststore
 truststore.inject_into_ssl() #use the windows certificate store (needed with AVG https scanning)
-from mailbox import Mailbox
 import tkinter as tk
-from tkinter import ttk
 from gtts import gTTS
 from google import genai
 import os
@@ -22,10 +20,9 @@ from ctypes import wintypes
 import python_weather
 import threading
 from imap_tools import MailBox
-import email
 from email.header import decode_header
 import requests
-from requests.structures import CaseInsensitiveDict
+import re
 
 from tkinter import scrolledtext
 import queue
@@ -37,7 +34,6 @@ enter_msg=["hello, how can i help you?","yes master?","what do you want?"]
 exit_msg=["goodbye!","see you later!","may your rule be eternal!"]
 ai_prompts_prev=["you are a helpful assistant. answer the user in a concise and informative manner."]
 ai_api_key="AQ.Ab8RN6IvCuUAbRVpFkS5cIylq4-_sXIn74xdWyJ60p3zjB8DYA"
-restaurant_api_key="eb5c8a0e40124886a2118b0dbb248ea3"
 MAIL_USER = "tomer.baras@gmail.com"
 MAIL_PASSWORD = "uisi qbqt vtfp oxpl"
 IMAP_SERVER = "imap.gmail.com"
@@ -57,34 +53,13 @@ class StopListening(Exception):
 def gui_post(kind, value):
     if gui_queue is not None:
         gui_queue.put((kind, value))
+def has_word(text, *words):
+    #whole word match, so "ai" doesn't fire on "rain" or "explain"
+    text=text.lower()
+    return any(re.search(r"\b"+re.escape(w)+r"\b", text) for w in words)
 def dummy_func():
     global b3
     b3=False
-def resturant_finder(key):
-    print("finder started")
-    
-
-    url = "https://api.geoapify.com/v2/places?categories=commercial.supermarket&filter=rect%3A10.716463143326969%2C48.755151258420966%2C10.835314015356737%2C48.680903341613316&limit=20&apiKey=eb5c8a0e40124886a2118b0dbb248ea3"
-
-    headers = CaseInsensitiveDict()
-    headers["Accept"] = "application/json"
-
-    resp = requests.get(url, headers=headers)
-
-    print(resp)
-def dropdown(title,listvalues):
-    root = tk.Tk()
-    root.title(title)
-    if not isinstance(listvalues, list):
-        print("listvalues must be a list")
-        return
-    label = tk.Label(root, text="Select an option:")
-    label.pack()
-    combo = ttk.Combobox(root, values=listvalues)
-    combo.pack()
-    root.mainloop()
-
-
 def ai_mode(key):
     global t, b3
     t=threading.Timer(300, dummy_func)
@@ -103,8 +78,8 @@ def ai_loop(key):
     b3=True
     while b3==True:
         audio=convert_audio_to_text(get_mic_input())
-        if "goodbye" in audio.lower():
-            text_to_speech("A mode deactivated. Goodbye!")
+        if has_word(audio, "goodbye"):
+            text_to_speech("AI mode deactivated. Goodbye!")
             b3=False
         else:
             text=audio
@@ -243,34 +218,32 @@ def convert_audio_to_text(audio):
 #command area
 def handle_command(text):
     global navi
-    if "goodbye" in text.lower():
+    if has_word(text, "goodbye"):
         text_to_speech(exit_msg[random.randint(0, len(exit_msg)-1)])
         navi=False
         gui_post("awake", False)
-    elif "weather" in text.lower():
+    elif has_word(text, "weather"):
         out=asyncio.run(get_weather())
         text_to_speech(out)
-    elif "mail" in text.lower():
+    elif has_word(text, "mail", "email", "emails", "inbox"):
         receive_mail()
         if len(mail_list)>0:
             text_to_speech("would you like me to read your latest email?")
             res=convert_audio_to_text(get_mic_input())
-            if "yes" in res.lower():
+            if has_word(res, "yes", "yeah", "sure"):
                     text_to_speech(mail_list[0].text)
         else:
             gui_post("system", "No unread mail.")
-    elif "homework" in text.lower() or "canvas" in text.lower() or "assignment" in text.lower():
+    elif has_word(text, "homework", "canvas", "assignment", "assignments"):
         text_to_speech(get_homework())
-    elif "ai" in text.lower():
+    elif has_word(text, "ai", "a.i"):
         ai_mode(ai_api_key)
-    elif "restaurant" in text.lower():
-        resturant_finder(restaurant_api_key)
 
 def assistant_loop():
     global navi
     while not stop_event.is_set():
         audio=convert_audio_to_text(get_mic_input())
-        if bot_name in audio.lower():
+        if has_word(audio, bot_name):
             navi=True
             gui_post("awake", True)
             text_to_speech(enter_msg[random.randint(0, len(enter_msg)-1)])
