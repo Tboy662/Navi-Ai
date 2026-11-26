@@ -8,6 +8,8 @@ from gtts import gTTS
 from google import genai
 import os
 import sys
+from dotenv import load_dotenv
+load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
 from playsound import playsound
 import pyaudiowpatch as pyaudio
 sys.modules['pyaudio'] = pyaudio
@@ -36,21 +38,22 @@ bot_name="navi"
 enter_msg=["hello, how can i help you?","yes master?","what do you want?"]
 exit_msg=["goodbye!","see you later!","may your rule be eternal!"]
 ai_prompts_prev=["you are a helpful assistant. answer the user in a concise and informative manner."]
-ai_api_key="AQ.Ab8RN6IvCuUAbRVpFkS5cIylq4-_sXIn74xdWyJ60p3zjB8DYA"
-restaurant_api_key="eb5c8a0e40124886a2118b0dbb248ea3"
-MAIL_USER = "tomer.baras@gmail.com"
-MAIL_PASSWORD = "uisi qbqt vtfp oxpl"
-IMAP_SERVER = "imap.gmail.com"
-IMAP_PORT = 993
-CANVAS_URL = os.environ.get("CANVAS_URL", "franklinjc.instructure.com") #e.g. https://yourschool.instructure.com
-CANVAS_API_KEY = os.environ.get("CANVAS_API_KEY", "22021~YBh7cR23DTNeGZ6yTNABTt3tVMUCJPYXPxRWXwc2CxPKrKGAtP6KkVznZ7WeFf22") #canvas > account > settings > new access token
+#secrets are loaded from a .env file next to this script (see .env.example)
+ai_api_key=os.environ.get("GEMINI_API_KEY", "")
+restaurant_api_key=os.environ.get("GEOAPIFY_API_KEY", "")
+MAIL_USER = os.environ.get("MAIL_USER", "")
+MAIL_PASSWORD = os.environ.get("MAIL_PASSWORD", "") #gmail app password
+IMAP_SERVER = os.environ.get("IMAP_SERVER", "imap.gmail.com")
+IMAP_PORT = int(os.environ.get("IMAP_PORT", "993"))
+CANVAS_URL = os.environ.get("CANVAS_URL", "") #e.g. https://yourschool.instructure.com
+CANVAS_API_KEY = os.environ.get("CANVAS_API_KEY", "") #canvas > account > settings > new access token
 b3=True
 navi=False
 gui_queue=None #set when the gui is running
 speak_lock=threading.Lock() #only one tts at a time (they share output.mp3)
 stop_event=threading.Event() #set by the gui to stop listening
 if ai_api_key=="":
-    print("Please set your API key in the 'ai_api_key' variable, else the AI functionality will not work.")
+    print("Please set GEMINI_API_KEY in your .env file, else the AI functionality will not work.")
 #-func area
 class StopListening(Exception):
     pass
@@ -64,7 +67,7 @@ def resturant_finder(key):
     print("finder started")
     
 
-    url = "https://api.geoapify.com/v2/places?categories=commercial.supermarket&filter=rect%3A10.716463143326969%2C48.755151258420966%2C10.835314015356737%2C48.680903341613316&limit=20&apiKey=eb5c8a0e40124886a2118b0dbb248ea3"
+    url = "https://api.geoapify.com/v2/places?categories=commercial.supermarket&filter=rect%3A10.716463143326969%2C48.755151258420966%2C10.835314015356737%2C48.680903341613316&limit=20&apiKey=" + key
 
     headers = CaseInsensitiveDict()
     headers["Accept"] = "application/json"
