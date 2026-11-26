@@ -120,7 +120,7 @@ py -3.14 -m pip install -r requirements.txt pyinstaller
 py -3.14 packaging\build_windows.py
 ```
 
-This makes `dist\Navi-Setup.exe`. Navi is compiled as a folder (so it starts fast, with nothing to unpack at launch), zipped, and glued onto the end of the small setup program, which starts unpacking while you type your keys. The build copies in only the files Navi needs (sounds, the offline wake word models, the Minecraft guides) and stops if any key from your `.env` or `navi_settings.json` shows up in it, so your keys are never shipped. Agent browser mode isn't in the installed build (it needs Playwright's own Chromium); run from source for that.
+This makes `dist\Navi-Setup.exe`. Navi is compiled as a folder (so it starts fast, with nothing to unpack at launch), zipped, and glued onto the end of the small setup program, which starts unpacking while you type your keys. The build copies in only the files Navi needs (sounds, the offline wake word models, the Minecraft guides) and stops if any key from your `.env` or `navi_settings.json` shows up in it, so your keys are never shipped. Agent browser mode is included; its Chromium (about 150 MB) isn't, and downloads into Navi's `agent_browser` folder the first time agent mode opens a page.
 
 ## Troubleshooting
 

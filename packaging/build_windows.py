@@ -7,6 +7,7 @@ Steps: draws the icon, compiles Navi with PyInstaller (a folder, so Navi starts 
 checks no key from .env or navi_settings.json ended up in it, zips it, compiles the small setup program
 (navi_setup.py) as one exe and glues the zip onto its end. Setup reads the zip straight out of its own file.
 Your keys are never put in the build: only the files listed in DATA below are copied in.
+Agent mode's Chromium isn't in it: Navi downloads it into agent_browser the first time agent mode opens a page.
 """
 import json
 import os
@@ -23,7 +24,7 @@ SEP = os.pathsep
 DATA = ["sounds", "minecraft_knowledge.md", "minecraft_examples.json", "voice_clone_worker.py", "COMMANDS.md",
         ".env.example", "vosk_model", "vosk_spk_model"]
 OPTIONAL_DATA = {"vosk_model", "vosk_spk_model"}  # offline wake word models: Navi falls back to Google without them
-EXCLUDE = ["playwright", "matplotlib", "scipy", "pandas", "torch", "IPython", "pytest", "setuptools"]
+EXCLUDE = ["matplotlib", "scipy", "pandas", "torch", "IPython", "pytest", "setuptools"]
 SECRET_FILES = [".env", "navi_settings.json", "navi_memory.json", "google_token.json", "google_credentials.json"]
 
 
@@ -87,7 +88,7 @@ def build_navi(icon):
             "--contents-directory", ".", "--icon", icon, "--noconfirm", "--clean",
             "--distpath", os.path.join(BUILD, "app"), "--workpath", os.path.join(BUILD, "work"), "--specpath", BUILD,
             "--hidden-import", "navi_setup", "--collect-binaries", "vosk", "--collect-data", "gtts",
-            "--collect-data", "speech_recognition", "--collect-submodules", "edge_tts"]
+            "--collect-data", "speech_recognition", "--collect-data", "playwright", "--collect-submodules", "edge_tts"]
     for name in DATA:
         src = os.path.join(ROOT, name)
         if not os.path.exists(src):
@@ -114,7 +115,7 @@ def build_setup(icon, payload):
     run([sys.executable, "-m", "PyInstaller", "navi_setup.py", "--name", "Navi-Setup-stub", "--windowed", "--onefile",
          "--icon", icon, "--noconfirm", "--clean", "--distpath", os.path.join(BUILD, "setup"),
          "--workpath", os.path.join(BUILD, "work-setup"), "--specpath", BUILD]
-        + sum((["--exclude-module", m] for m in EXCLUDE + ["numpy", "PIL"]), []))
+        + sum((["--exclude-module", m] for m in EXCLUDE + ["numpy", "PIL", "playwright"]), []))
     os.makedirs(DIST, exist_ok=True)
     out = os.path.join(DIST, "Navi-Setup.exe")
     with open(out, "wb") as dst:

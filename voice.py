@@ -1131,6 +1131,18 @@ LABEL_ELEMENTS_JS="""() => {
   return out;
 }"""
 
+def install_agent_browser():
+    #downloads playwright's chromium (about 150 MB, once) into agent_browser\chromium, with the driver that ships with
+    #playwright, so it works in the installed Navi.exe too (there's no "python -m playwright" there)
+    from playwright._impl._driver import compute_driver_executable, get_driver_env
+    gui_post("system", "Downloading the agent browser (about 150 MB, one time only)...")
+    env=dict(get_driver_env(), PLAYWRIGHT_BROWSERS_PATH=os.environ["PLAYWRIGHT_BROWSERS_PATH"])
+    result=subprocess.run([*compute_driver_executable(), "install", "chromium"], env=env, capture_output=True, text=True,
+                          timeout=1800, creationflags=0x08000000 if IS_WINDOWS else 0) #CREATE_NO_WINDOW
+    if result.returncode!=0:
+        raise RuntimeError("couldn't download the agent browser: "+(result.stderr or result.stdout).strip()[-200:])
+    gui_post("system", "The agent browser is ready.")
+
 class AgentBrowser:
     #playwright only allows one thread to touch the browser, so every action is queued onto this one
     def __init__(self):
@@ -1181,9 +1193,16 @@ class AgentBrowser:
     def ensure_page(self):
         #(re)opens the window if it isn't open yet or the user closed it
         if self.context is None:
-            self.context=self.pw.chromium.launch_persistent_context(AGENT_BROWSER_PROFILE, headless=False,
+            launch=lambda: self.pw.chromium.launch_persistent_context(AGENT_BROWSER_PROFILE, headless=False,
                 no_viewport=True, args=["--window-size=1200,850"], accept_downloads=True,
                 downloads_path=os.path.join(AGENT_BROWSER_DIR, "downloads")) #not the encrypted temp folder
+            try:
+                self.context=launch()
+            except Exception as e:
+                if "playwright install" not in str(e) and "Executable doesn't exist" not in str(e):
+                    raise
+                install_agent_browser() #first use: chromium isn't downloaded yet
+                self.context=launch()
             self.context.on("close", lambda _: setattr(self, "context", None))
             self.context.add_init_script(VIRTUAL_MOUSE_JS) #games can't grab your real mouse
             self.context.on("page", self.watch) #follow links that open a new tab
