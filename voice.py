@@ -3,6 +3,11 @@ import sys
 if len(sys.argv)>1 and sys.argv[1] in ("--keys", "--uninstall"): #key setup and uninstall (navi_setup.py), before the heavy imports
     import navi_setup
     sys.exit(navi_setup.main(sys.argv[1:]))
+if getattr(sys, "frozen", False) and len(sys.argv)==1: #auto-update: a checked update waiting from last time installs now
+    import os, navi_setup, updater
+    _here=os.path.dirname(os.path.abspath(__file__))
+    if updater.install_pending_at_start(_here, navi_setup.INSTALL_DIR, navi_setup.VERSION, os.path.join(_here, "navi_settings.json")):
+        sys.exit(0)
 import truststore
 truststore.inject_into_ssl() #use the windows certificate store (needed with AVG https scanning)
 from mailbox import Mailbox
@@ -669,7 +674,7 @@ DEFAULT_SETTINGS={"voice": "google:com", "speed": 0, "pitch": 0, "volume": 100,
                   "brief_on_start": True, "brief_on_wake": True, "wake_minutes": 5, "listen_pause": 2.0,
                   "city": "", "precise_location": True, "diet": [], "units": "C", "offline_wake": True, "voice_stop": True,
                   "phone_topic": "", "phone_when": "away", "phone_briefing": False,
-                  "only_my_voice": False, "voice_fixes": True, "hf_token": "", "last_voice": "google:com",
+                  "only_my_voice": False, "voice_fixes": True, "hf_token": "", "last_voice": "google:com", "auto_update": False,
                   "messages": {"greeting": enter_msg, "goodbye": exit_msg, "unclear": unclear_msg, "offline": offline_msg}}
 MESSAGE_KINDS={ #setting -> (name in the settings window, when navi says it, for the ai)
     "greeting": ("Greetings", "when it's woken up by its name"),
@@ -3738,6 +3743,59 @@ def start_day_briefings():
         threading.Thread(target=day_briefing, args=("start",), daemon=True).start()
     threading.Thread(target=wake_watcher, daemon=True).start()
 
+#updates area: settings > updates. Off by default; once a day the installed Navi.exe looks for a newer release on
+#github, downloads it, checks its sha-256 and installs it the next time it opens. updater.py has the safety rules
+import updater
+import navi_setup
+APP_VERSION=navi_setup.VERSION
+APP_FOLDER=os.path.dirname(os.path.abspath(__file__))
+UPDATES_FOLDER=os.path.join(navi_setup.INSTALL_DIR, navi_setup.UPDATES_DIR)
+CAN_SELF_UPDATE=updater.can_self_update(APP_FOLDER, navi_setup.INSTALL_DIR)
+update_lock=threading.Lock()
+update_state={"status": "", "ready": None, "checked": 0.0} #ready: the checked installer, waiting to be installed
+
+def update_check(download=True):
+    #looks for a newer navi (and downloads it when it can install it); returns a sentence about what happened
+    if not update_lock.acquire(blocking=False):
+        return update_state["status"] or "Already checking."
+    try:
+        update_state["status"]="Checking for updates..."
+        update_state["checked"]=time.time()
+        found=updater.check(APP_VERSION)
+        if found is None:
+            update_state["status"]=f"Navi {APP_VERSION} is the newest version."
+        elif not (download and CAN_SELF_UPDATE):
+            update_state["status"]=f"Navi {found['version']} is out (this is {APP_VERSION})."
+        else:
+            def progress(f):
+                update_state["status"]=f"Downloading Navi {found['version']}... {int(f*100)}%"
+            update_state["ready"]=updater.download(found, UPDATES_FOLDER, progress)
+            when="It installs the next time Navi opens, or press Install now." if settings["auto_update"] else "Press Install now to install it."
+            update_state["status"]=f"Navi {found['version']} is downloaded and checked. "+when
+            gui_post("system", f"Navi {found['version']} is downloaded and checked. "+when+" (Settings > Updates)")
+    except updater.UpdateError as e:
+        update_state["status"]="Couldn't update: "+str(e)+"."
+    except OSError as e:
+        update_state["status"]="Couldn't save the update: "+str(e)
+    finally:
+        update_lock.release()
+    print("update; "+update_state["status"])
+    return update_state["status"]
+
+def update_watcher():
+    #checks a couple of minutes after navi opens, then once a day, while auto-update is on
+    time.sleep(120)
+    while not stop_event.is_set():
+        if settings["auto_update"] and CAN_SELF_UPDATE and update_state["ready"] is None \
+                and time.time()-update_state["checked"]>=updater.CHECK_EVERY:
+            update_check()
+        time.sleep(60)
+
+def start_updates():
+    if CAN_SELF_UPDATE:
+        update_state["ready"]=updater.pending(UPDATES_FOLDER, APP_VERSION) #downloaded earlier and not installed yet
+        threading.Thread(target=update_watcher, daemon=True).start()
+
 #email drafts area: "draft an email to ..." or "reply to ...": the ai writes it, navi reads it out, you change it by
 #voice, and it's saved to your gmail drafts. It's never sent
 DRAFT_MAX_CHANGES=8
@@ -6069,7 +6127,7 @@ class SettingsWindow:
                             ("Listening", self.listening_page),
                             ("Day briefing", self.briefing_page), ("Location", self.location_page),
                             ("Phone alerts", self.phone_page), ("Keys", self.keys_page), ("Calendar", self.calendar_page), ("Memory", self.memory_page),
-                            ("Startup", self.startup_page)):
+                            ("Startup", self.startup_page), ("Updates", self.updates_page)):
             self.body=tk.Frame(stack, bg=c["bg"])
             self.body.grid(row=0, column=0, sticky="nsew")
             self.row=0
@@ -6276,6 +6334,62 @@ class SettingsWindow:
         self.section("Startup")
         self.startup=tk.BooleanVar(value=starts_with_windows())
         self.check("Open Navi when Windows starts", None, self.startup, self.toggle_startup)
+
+    def updates_page(self):
+        self.section("Updates")
+        self.label(f"This is Navi {APP_VERSION}.", muted=False)
+        if CAN_SELF_UPDATE:
+            self.auto_update=tk.BooleanVar(value=settings["auto_update"])
+            self.check("Install updates automatically", None, self.auto_update, self.toggle_auto_update)
+            self.label("Once a day I look for a new version of Navi on GitHub (github.com/"+updater.REPO+"). A new version "
+                       "is downloaded over a secure connection, checked against its published SHA-256 fingerprint, and "
+                       "installed the next time I open. Anything that doesn't match is thrown away. Your keys, settings "
+                       "and memories are kept.")
+        else:
+            self.label("Updates install by themselves only in the installed Navi (from Navi-Setup.exe). This copy runs "
+                       "from its source code, so get new versions with git pull.")
+        made=self.buttons(("Check now", self.check_updates, False), ("Install now", self.install_update, True))
+        self.update_install=made[1]
+        self.update_status=self.label(update_state["status"])
+        self.show_update_state()
+
+    def show_update_state(self):
+        #keeps the status line current while a check or download runs, and offers Install now once one is ready
+        if not self.win.winfo_exists():
+            return
+        self.update_status.configure(text=update_state["status"])
+        if update_state["ready"]:
+            if not self.update_install.winfo_ismapped():
+                self.update_install.pack(side="left", padx=(6,0))
+        else:
+            self.update_install.pack_forget()
+        if update_lock.locked():
+            self.win.after(500, self.show_update_state)
+
+    def check_updates(self):
+        update_state["status"]="Checking for updates..."
+        self.in_background(update_check, lambda result: self.show_update_state())
+        self.win.after(300, self.show_update_state)
+
+    def toggle_auto_update(self):
+        self.set("auto_update", self.auto_update.get())
+        if self.auto_update.get() and update_state["ready"] is None and not update_lock.locked():
+            self.check_updates()
+
+    def install_update(self):
+        path=updater.pending(UPDATES_FOLDER, APP_VERSION) if CAN_SELF_UPDATE else None
+        if not path:
+            update_state["ready"]=None
+            update_state["status"]="There's no checked update to install. Press Check now."
+            self.show_update_state()
+            return
+        try:
+            updater.install(path, navi_setup.INSTALL_DIR)
+        except (updater.UpdateError, OSError) as e:
+            update_state["status"]="Couldn't start the update: "+str(e)
+            self.show_update_state()
+            return
+        self.gui.on_close() #the installer opens the new navi when it's done
 
     def listening_page(self):
         self.section("Listening")
@@ -6709,5 +6823,6 @@ elif test==3:
     NaviGUI(root)
     start_day_briefings() #sums up email and canvas now, and again whenever the pc wakes from sleep
     start_everyday_tools() #reminders and timers go off on time
+    start_updates() #auto-update, when it's turned on in settings
     root.mainloop()
 

@@ -3,6 +3,7 @@
     Navi-Setup.exe                     installs Navi on Windows and asks for each key (writes .env)
     Navi.exe --keys                    asks for the keys again (also: python voice.py --keys)
     Navi.exe --uninstall               removes Navi from this PC
+    Navi-Setup.exe --update            installs a newer Navi over the one there, keeping keys and data (auto-update)
     python navi_setup.py --keys --dir DIR   the key wizard for a source install (the Mac installer uses this)
 
 Only the standard library and tkinter, so it opens fast. On Windows the program files travel as a zip appended to
@@ -26,6 +27,7 @@ PUBLISHER = "Tboy662"
 IS_WINDOWS = sys.platform == "win32"
 IS_MAC = sys.platform == "darwin"
 FROZEN = getattr(sys, "frozen", False)
+UPDATES_DIR = "updates"  # auto-update downloads Navi-Setup.exe here (updater.py)
 MANIFEST = "navi_install.json"  # the program files a Windows install put down (everything else is the user's data)
 UNINSTALL_KEY = r"Software\Microsoft\Windows\CurrentVersion\Uninstall\Navi"
 
@@ -355,7 +357,8 @@ def finish_install(folder, staged, files, options, env_values, calendar_file):
     remove_empty_dirs(folder)
     with open(os.path.join(folder, MANIFEST), "w", encoding="utf-8") as f:
         json.dump({"version": VERSION, "files": sorted(new_files)}, f, indent=0)
-    write_env(os.path.join(folder, ".env"), env_values)
+    if env_values is not None:  # None: an update, which leaves .env exactly as it is
+        write_env(os.path.join(folder, ".env"), env_values)
     if calendar_file:
         shutil.copyfile(calendar_file, os.path.join(folder, "google_credentials.json"))
     exe = os.path.join(folder, "Navi.exe")
@@ -395,6 +398,8 @@ def uninstall_windows(folder, keep_data):
         program = set(os.path.normcase(os.path.normpath(p)) for p in manifest.get("files", [])) | {MANIFEST.lower()}
         os.makedirs(SAVED_DIR, exist_ok=True)
         for root, dirs, files in os.walk(folder):
+            if root == folder and UPDATES_DIR in dirs:  # downloaded installers aren't worth keeping
+                dirs.remove(UPDATES_DIR)
             for name in files:
                 full = os.path.join(root, name)
                 rel = os.path.relpath(full, folder)
@@ -806,6 +811,80 @@ class Wizard:
         return 0
 
 
+# ---------------------------------------------------------------------------------------------------------------
+# updating (Navi's auto-update downloads and checks this setup, then runs it with --update)
+# ---------------------------------------------------------------------------------------------------------------
+def version_tuple(text):
+    try:
+        parts = tuple(int(p) for p in str(text).split("."))
+        return parts if len(parts) == 3 else None
+    except ValueError:
+        return None
+
+
+def update_refusal(installed_manifest):
+    # why this setup won't update the install there, or "" when it may
+    if installed_manifest is None:
+        return f"Navi isn't installed in {INSTALL_DIR}, so there's nothing to update."
+    old, new = version_tuple(installed_manifest.get("version")), version_tuple(VERSION)
+    if new is None:
+        return "This setup has no version number."
+    if old is not None and new <= old:
+        return f"Navi {installed_manifest.get('version')} is already installed, and this setup is {VERSION}."
+    return ""
+
+
+def run_update(payload):
+    """Installs these program files over the existing Navi without asking anything, then opens Navi again."""
+    folder = INSTALL_DIR
+    refusal = update_refusal(read_manifest(folder))
+    if refusal:
+        print(refusal)
+        exe = os.path.join(folder, "Navi.exe")
+        if os.path.isfile(exe):  # Navi closed itself for this update, so it's opened again as it was
+            subprocess.Popen([exe], cwd=folder, close_fds=True)
+        return 0 if "already installed" in refusal else 4
+    root = tk.Tk()
+    root.title("Updating Navi")
+    root.geometry("360x110")
+    root.resizable(False, False)
+    root.protocol("WM_DELETE_WINDOW", lambda: None)  # half an update is worse than waiting a minute
+    ttk.Label(root, text=f"Updating Navi to version {VERSION}...", font=(FONT, 11)).pack(pady=(20, 8))
+    bar = ttk.Progressbar(root, length=300, maximum=1.0)
+    bar.pack()
+    state = {"progress": 0.0, "done": False, "error": None}
+
+    def work():
+        try:
+            staged = os.path.join(folder, ".incoming")
+            shutil.rmtree(staged, ignore_errors=True)
+            os.makedirs(staged, exist_ok=True)
+            files = unpack(payload, staged, lambda f: state.update(progress=f * 0.9))
+            paths = shortcut_paths()  # keep the desktop and startup shortcuts the way you had them
+            options = {k: os.path.exists(paths[k]) for k in ("desktop", "startup")}
+            state["exe"] = finish_install(folder, staged, files, options, None, None)
+        except Exception as e:
+            state["error"] = e
+        state["done"] = True
+    threading.Thread(target=work, daemon=True).start()
+
+    def poll():
+        bar["value"] = state["progress"]
+        if not state["done"]:
+            root.after(100, poll)
+            return
+        if state["error"]:
+            messagebox.showerror("Updating Navi", f"Navi couldn't be updated: {state['error']}\n\n"
+                                 "If Navi doesn't open, run Navi-Setup.exe from the Releases page on GitHub again.")
+        exe = state.get("exe") or os.path.join(folder, "Navi.exe")
+        if os.path.isfile(exe):
+            subprocess.Popen([exe], cwd=folder, close_fds=True)
+        root.destroy()
+    poll()
+    root.mainloop()
+    return 1 if state["error"] else 0
+
+
 def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
     folder = app_dir()
@@ -818,6 +897,8 @@ def main(argv=None):
     payload = open_payload() if FROZEN and IS_WINDOWS else None
     if "--selftest" in argv:  # the build checks the glued-on zip is readable
         return 0 if payload and payload.testzip() is None else 3
+    if "--update" in argv:
+        return run_update(payload) if payload else 2
     if "--keys" in argv or payload is None:
         return Wizard("keys", folder).run()
     return Wizard("install", INSTALL_DIR, payload).run()

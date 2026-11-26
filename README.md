@@ -9,6 +9,7 @@ Navi is an always-listening voice assistant for Windows and macOS. Say **"Navi"*
 - **Navi** and **Navi key setup** (change your keys) are in the Start menu.
 - To remove it, use Settings > Apps > Navi voice assistant, or **Uninstall Navi** in the Start menu. It removes the folder, shortcuts and registry entry. You can tick "Keep my keys" to save them for a later install.
 - Running a newer `Navi-Setup.exe` updates Navi and keeps your keys, settings and notes.
+- **Automatic updates** are off until you tick *Install updates automatically* in Settings > Updates. Then once a day Navi looks for a new release here on GitHub, downloads it, checks it against its published SHA-256 fingerprint and installs it the next time it opens (or right away with *Install now*). See [Publishing a new version](#publishing-a-new-version).
 
 **macOS:** install Python 3.10+ from [python.org](https://www.python.org/downloads/macos/) and [Homebrew](https://brew.sh), then in Terminal:
 
@@ -123,6 +124,29 @@ py -3.14 packaging\build_windows.py
 ```
 
 This makes `dist\Navi-Setup.exe`. Navi is compiled as a folder (so it starts fast, with nothing to unpack at launch), zipped, and glued onto the end of the small setup program, which starts unpacking while you type your keys. The build copies in only the files Navi needs (sounds, the offline wake word models, the Minecraft guides) and stops if any key from your `.env` or `navi_settings.json` shows up in it, so your keys are never shipped. Agent browser mode is included; its Chromium (about 150 MB) isn't, and downloads into Navi's `agent_browser` folder the first time agent mode opens a page.
+
+## Publishing a new version
+
+Installed copies with automatic updates on pick up the newest GitHub release of this repo. To publish one:
+
+1. Raise `VERSION` in `navi_setup.py` (for example `1.0.0` to `1.0.1`), commit, and push to `main`.
+2. Run:
+
+```powershell
+py -3.14 packaging\release.py
+```
+
+It builds `dist\Navi-Setup.exe`, writes `dist\navi-update.json` (version, size and SHA-256 of the setup), and uploads both as release `v1.0.1`. It asks for a GitHub token for the upload: a fine-grained token at [github.com/settings/personal-access-tokens](https://github.com/settings/personal-access-tokens) with only this repository and *Contents: Read and write*. The token is used once and never saved. Press Enter instead to get the steps for uploading the two files on github.com by hand.
+
+How the updater stays safe (`updater.py`):
+
+- It only talks HTTPS, with the certificate checked, to `api.github.com`, `github.com` and GitHub's download hosts. A redirect anywhere else is refused.
+- It only looks at the newest published (not draft, not pre-release) release of `Tboy662/Navi-Ai`, tagged like `v1.2.3`, and only downloads from that release's standard download links.
+- The download must match the size and SHA-256 in `navi-update.json`, and the hash GitHub records for the upload. Anything else is deleted and never run.
+- It only installs a newer version, and the setup checks that again, so Navi is never downgraded. A failed update is tried once, not in a loop.
+- The update keeps `.env`, settings, memory and your other files; only the program files listed in `navi_install.json` are replaced.
+
+Anyone who can publish releases on this repo can ship code to installed copies, so keep the GitHub account behind it protected with two-factor sign-in.
 
 ## Troubleshooting
 
