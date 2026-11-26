@@ -4,7 +4,7 @@ Navi is an always-listening voice assistant for Windows. Say **"Navi"** to wake 
 
 ## Requirements
 
-- **Windows 10 or 11.** Navi only runs on Windows. The status orb draws itself with Windows APIs (`ctypes.windll`), the microphone library (PyAudioWPatch) is Windows-only, and HTTPS uses the Windows certificate store. It will not start on macOS or Linux.
+- **Windows 10 or 11.** Navi only runs on Windows. The status orb draws itself with Windows APIs (`ctypes.windll`), and the microphone library (PyAudioWPatch) is Windows-only. It will not start on macOS or Linux.
 - **Python 3.10 or newer** from [python.org](https://www.python.org/downloads/windows/). During install, tick "Add python.exe to PATH" and keep "tcl/tk and IDLE" selected (Navi's window needs tkinter).
 - A **microphone** and **speakers**.
 - An **internet connection**. Speech recognition, text to speech, the AI and every command go online.
