@@ -8,9 +8,15 @@ from gtts import gTTS
 from google import genai
 import os
 import sys
-from playsound import playsound
-import pyaudiowpatch as pyaudio
-sys.modules['pyaudio'] = pyaudio
+import subprocess
+IS_WINDOWS=sys.platform=="win32"
+IS_MAC=sys.platform=="darwin"
+if not IS_MAC:
+    from playsound import playsound
+if IS_WINDOWS:
+    import pyaudiowpatch as pyaudio #windows-only pyaudio fork
+    sys.modules['pyaudio'] = pyaudio
+#on mac speech_recognition uses the normal pyaudio package and replies play through afplay
 import speech_recognition as sr
 import asyncio
 import random
@@ -200,7 +206,10 @@ def text_to_speech(text, lang='en'):
         tts = gTTS(text=text, lang=lang)
         filename = "output.mp3"
         tts.save(filename)
-        playsound(filename)
+        if IS_MAC:
+            subprocess.run(["afplay", filename])
+        else:
+            playsound(filename)
         os.remove(filename)
     gui_post("status", "idle")
 #get mic func
@@ -278,6 +287,7 @@ def assistant_loop():
                 handle_command(convert_audio_to_text(get_mic_input()))
 
 #gui area
+UI_FONT="Segoe UI" if IS_WINDOWS else "Helvetica Neue" if IS_MAC else "TkDefaultFont"
 class BLENDFUNCTION(ctypes.Structure):
     _fields_=[("BlendOp",ctypes.c_ubyte),("BlendFlags",ctypes.c_ubyte),("SourceConstantAlpha",ctypes.c_ubyte),("AlphaFormat",ctypes.c_ubyte)]
 class BITMAPINFOHEADER(ctypes.Structure):
@@ -316,7 +326,10 @@ class StatusOrb:
         self.bg_target=0.0
         yy,xx=np.mgrid[0:s,0:s].astype(np.float32)
         self.xx,self.yy=xx,yy
-        self.setup_layered()
+        if IS_WINDOWS:
+            self.setup_layered()
+        else:
+            self.setup_mac()
         self.sample_background()
         self.animate()
 
@@ -333,6 +346,8 @@ class StatusOrb:
             right,bottom=rect.right,rect.bottom
         except Exception:
             pass
+        if IS_MAC:
+            bottom=self.win.winfo_screenheight()-80 #leave room for the dock
         return right-self.SIZE-4, bottom-self.SIZE-4
 
     def setup_layered(self):
@@ -359,6 +374,34 @@ class StatusOrb:
         gdi32.SelectObject(self.mem_dc, bmp)
         self.screen_dc=user32.GetDC(None)
         self.blend=BLENDFUNCTION(0, 0, 255, 1) #AC_SRC_OVER, use per-pixel alpha
+
+    def setup_mac(self):
+        #tk on macos can make a window fully transparent, so the orb is just an rgba image on it
+        from PIL import ImageTk
+        self.ImageTk=ImageTk
+        self.win.attributes("-transparent", True)
+        self.win.configure(bg="systemTransparent")
+        self.label=tk.Label(self.win, bg="systemTransparent", bd=0, highlightthickness=0)
+        self.label.pack()
+        self.photo=None
+
+    def show_mac(self, rgb, alpha):
+        #tk wants straight (not premultiplied) alpha
+        from PIL import Image
+        straight=rgb/np.maximum(alpha, 1e-6)[...,None]
+        rgba=np.dstack((straight, alpha))
+        img=Image.fromarray((np.clip(rgba,0,1)*255).astype(np.uint8), "RGBA")
+        self.photo=self.ImageTk.PhotoImage(img) #keep a reference or tk drops the image
+        self.label.configure(image=self.photo)
+
+    def show_windows(self, rgb, alpha):
+        s=self.SIZE
+        bgra=np.dstack((rgb[...,2], rgb[...,1], rgb[...,0], alpha))
+        buf=(np.clip(bgra,0,1)*255).astype(np.uint8).tobytes()
+        ctypes.memmove(self.bits, buf, len(buf))
+        ctypes.windll.user32.UpdateLayeredWindow(self.hwnd, self.screen_dc,
+            ctypes.byref(wintypes.POINT(self.x,self.y)), ctypes.byref(wintypes.SIZE(s,s)),
+            self.mem_dc, ctypes.byref(wintypes.POINT(0,0)), 0, ctypes.byref(self.blend), 2) #ULW_ALPHA
 
     def sample_background(self):
         #look at a strip just left of the orb so colors can lighten/darken to stay visible
@@ -410,13 +453,18 @@ class StatusOrb:
         #tone map on the brightest channel so overlaps glow without shifting the hue, then premultiply
         peak=np.maximum(light.max(axis=2), 1e-6)
         rgb=light*((1-np.exp(-peak*1.3))/peak*alpha)[...,None]
-        bgra=np.dstack((rgb[...,2], rgb[...,1], rgb[...,0], alpha))
-        buf=(np.clip(bgra,0,1)*255).astype(np.uint8).tobytes()
-        ctypes.memmove(self.bits, buf, len(buf))
-        ctypes.windll.user32.UpdateLayeredWindow(self.hwnd, self.screen_dc,
-            ctypes.byref(wintypes.POINT(self.x,self.y)), ctypes.byref(wintypes.SIZE(s,s)),
-            self.mem_dc, ctypes.byref(wintypes.POINT(0,0)), 0, ctypes.byref(self.blend), 2) #ULW_ALPHA
+        if IS_WINDOWS:
+            self.show_windows(rgb, alpha)
+        else:
+            self.show_mac(rgb, alpha)
         self.win.after(33, self.animate)
+
+class NoOrb:
+    #other systems can't draw a see-through window, so they skip the orb
+    def set_state(self, state):
+        pass
+    def set_loud(self, loud):
+        pass
 
 class NaviGUI:
     COLORS={"bg":"#1e1f26","panel":"#2a2c36","text":"#e6e6eb","muted":"#8b8d98",
@@ -439,25 +487,25 @@ class NaviGUI:
         #header: name + status light
         header=tk.Frame(root, bg=c["bg"])
         header.pack(fill="x", padx=16, pady=(16,8))
-        tk.Label(header, text=bot_name.upper(), font=("Segoe UI",20,"bold"),
+        tk.Label(header, text=bot_name.upper(), font=(UI_FONT,20,"bold"),
                  fg=c["text"], bg=c["bg"]).pack(side="left")
-        self.status_text=tk.Label(header, font=("Segoe UI",11), fg=c["muted"], bg=c["bg"])
+        self.status_text=tk.Label(header, font=(UI_FONT,11), fg=c["muted"], bg=c["bg"])
         self.status_text.pack(side="right")
         self.dot=tk.Canvas(header, width=14, height=14, bg=c["bg"], highlightthickness=0)
         self.dot_id=self.dot.create_oval(2,2,12,12, outline="")
         self.dot.pack(side="right", padx=6)
         self.awake_text=tk.Label(root, text=f'Say "{bot_name}" to wake me up',
-                                 font=("Segoe UI",10), fg=c["muted"], bg=c["bg"], anchor="w")
+                                 font=(UI_FONT,10), fg=c["muted"], bg=c["bg"], anchor="w")
         self.awake_text.pack(fill="x", padx=16)
 
         #conversation log
-        self.log=scrolledtext.ScrolledText(root, wrap="word", font=("Segoe UI",11),
+        self.log=scrolledtext.ScrolledText(root, wrap="word", font=(UI_FONT,11),
                                            bg=c["panel"], fg=c["text"], relief="flat",
                                            padx=10, pady=10, state="disabled")
         self.log.pack(fill="both", expand=True, padx=16, pady=8)
         for tag in ("you","navi","system"):
             self.log.tag_config(tag, foreground=c[tag])
-        self.log.tag_config("name", font=("Segoe UI",11,"bold"))
+        self.log.tag_config("name", font=(UI_FONT,11,"bold"))
 
         #buttons
         buttons=tk.Frame(root, bg=c["bg"])
@@ -470,7 +518,7 @@ class NaviGUI:
         #typed questions go straight to the ai
         entry_row=tk.Frame(root, bg=c["bg"])
         entry_row.pack(fill="x", padx=16, pady=(8,16))
-        self.entry=tk.Entry(entry_row, font=("Segoe UI",11), bg=c["panel"], fg=c["text"],
+        self.entry=tk.Entry(entry_row, font=(UI_FONT,11), bg=c["panel"], fg=c["text"],
                             insertbackground=c["text"], relief="flat")
         self.entry.pack(side="left", fill="x", expand=True, ipady=6)
         self.entry.bind("<Return>", lambda e: self.send_text())
@@ -480,7 +528,7 @@ class NaviGUI:
         self.ai=False
         self.processing=False
         self.typed=False
-        self.orb=StatusOrb(root)
+        self.orb=StatusOrb(root) if IS_WINDOWS or IS_MAC else NoOrb()
 
         self.set_status("stopped")
         self.add_line("system", f'Always listening. Say "{bot_name}" or type a question below.')
@@ -490,7 +538,7 @@ class NaviGUI:
 
     def make_button(self, parent, text, command, color=None):
         c=self.COLORS
-        return tk.Button(parent, text=text, command=command, font=("Segoe UI",10),
+        return tk.Button(parent, text=text, command=command, font=(UI_FONT,10),
                          bg=color or c["panel"], fg=c["text"], activebackground=c["accent"],
                          activeforeground=c["text"], relief="flat", padx=12, pady=6, cursor="hand2")
 

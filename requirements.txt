@@ -1,0 +1,17 @@
+# Navi voice assistant (voice.py) - Windows or macOS, Python 3.10+
+# On macOS run `brew install portaudio` before installing these.
+# Install with:  pip install -r requirements.txt
+# tkinter, ctypes, email and the other imports in voice.py ship with Python.
+
+truststore>=0.10          # use the system certificate store for HTTPS
+gTTS>=2.5                 # text to speech
+google-genai>=1.0         # Gemini AI ("ai" command and typed questions)
+playsound==1.2.2; sys_platform != "darwin"       # plays replies; 1.3.0 is broken on Windows. Macs use afplay
+PyAudioWPatch>=0.2.12; sys_platform == "win32"   # microphone access on Windows
+PyAudio>=0.2.14; sys_platform != "win32"         # microphone access on macOS
+SpeechRecognition>=3.10   # speech to text
+numpy>=1.24               # status orb drawing
+Pillow>=10.0              # screen sampling for the status orb
+python-weather>=2.0       # "weather" command
+imap-tools>=1.5           # "mail" command
+requests>=2.31            # Canvas homework and restaurant lookups
