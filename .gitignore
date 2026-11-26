@@ -33,3 +33,7 @@ minecraft_mod/
 *.wav
 *.mp3
 !sounds/*.wav
+
+# Build output (packaging/build_windows.py)
+build/
+dist/

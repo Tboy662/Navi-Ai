@@ -2,6 +2,24 @@
 
 Navi is an always-listening voice assistant for Windows and macOS. Say **"Navi"** to wake it up, then ask for the weather, your unread mail, your Canvas homework, or switch into a Gemini-powered AI chat. It comes with a small chat window and a glowing status orb in the corner of your screen.
 
+## Install
+
+**Windows:** download `Navi-Setup.exe` and run it. It installs Navi just for you (no admin rights) to `%LOCALAPPDATA%\Programs\Navi`, then walks you through each key with a link to where you get it, and saves them to `.env` in that folder. Python isn't needed. Afterwards:
+
+- **Navi** and **Navi key setup** (change your keys) are in the Start menu.
+- To remove it, use Settings > Apps > Navi voice assistant, or **Uninstall Navi** in the Start menu. It removes the folder, shortcuts and registry entry. You can tick "Keep my keys" to save them for a later install.
+- Running a newer `Navi-Setup.exe` updates Navi and keeps your keys, settings and notes.
+
+**macOS:** install Python 3.10+ from [python.org](https://www.python.org/downloads/macos/) and [Homebrew](https://brew.sh), then in Terminal:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Tboy662/Navi-Ai/main/install-mac.sh | bash
+```
+
+It installs Navi's code and its own packages in `~/Library/Application Support/Navi`, makes `~/Applications/Navi.app`, clears the Gatekeeper quarantine flag on Navi's files so it opens without warnings, and opens the same key setup window. Change keys later with `open -a Navi --args --keys`. Uninstall with `bash ~/Library/Application\ Support/Navi/app/install-mac.sh --uninstall` (add `--keep-keys` to keep your `.env`).
+
+To run from source instead, follow the steps below.
+
 ## Requirements
 
 - **Windows 10/11 or macOS.** On Linux the window works but the status orb is turned off, and it hasn't been tested there.
@@ -44,10 +62,13 @@ Navi is an always-listening voice assistant for Windows and macOS. Say **"Navi"*
 
 ## Keys and accounts
 
-Navi reads its keys from a `.env` file next to `voice.py`. Copy `.env.example` to `.env` and fill it in. Each feature needs its own key. If you leave one empty, the other features still work.
+Navi reads its keys from a `.env` file next to `voice.py`. Copy `.env.example` to `.env` and fill it in, or run `python voice.py --keys` for the same guided key setup the installer uses. Each feature needs its own key. If you leave one empty, the other features still work.
 
 | `.env` name | Used for | How to get it |
 | --- | --- | --- |
+| `GROQ_API_KEY` | Navi's main AI model | Create a free key at [console.groq.com/keys](https://console.groq.com/keys). |
+| `OPENROUTER_API_KEY` | Extra backup AI models | Optional. Create one at [openrouter.ai/keys](https://openrouter.ai/keys). |
+| `HF_TOKEN` | Speaking in your trained voice | Optional. Accept the conditions at [huggingface.co/kyutai/pocket-tts](https://huggingface.co/kyutai/pocket-tts), then make a Read token at [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens). |
 | `GEMINI_API_KEY` | The "ai" voice mode and questions typed in the window | Create a free Gemini API key at [Google AI Studio](https://aistudio.google.com/apikey). |
 | `MAIL_USER` | The "mail" command | Your Gmail address. |
 | `MAIL_PASSWORD` | The "mail" command | A Gmail **app password**, not your normal password. Turn on 2-Step Verification, then create one at [myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords). IMAP must be enabled in Gmail settings. |
@@ -91,6 +112,15 @@ The `test` variable at the top of `voice.py` picks how Navi runs:
 ### Sounds
 
 In the GUI, Navi plays two quiet cues: a soft chime when it switches mode (asleep, awake, or one of the AI modes) and a short blip when it starts thinking. They play in the background through `winsound` on Windows and `afplay` on Mac, so nothing extra needs installing. The files live in `sounds/`, `tools/make_sounds.py` regenerates them, and setting `SOUNDS_ENABLED = False` in `sounds.py` mutes them.
+
+## Building the Windows installer
+
+```powershell
+py -3.14 -m pip install -r requirements.txt pyinstaller
+py -3.14 packaging\build_windows.py
+```
+
+This makes `dist\Navi-Setup.exe`. Navi is compiled as a folder (so it starts fast, with nothing to unpack at launch), zipped, and glued onto the end of the small setup program, which starts unpacking while you type your keys. The build copies in only the files Navi needs (sounds, the offline wake word models, the Minecraft guides) and stops if any key from your `.env` or `navi_settings.json` shows up in it, so your keys are never shipped. Agent browser mode isn't in the installed build (it needs Playwright's own Chromium); run from source for that.
 
 ## Troubleshooting
 

@@ -1,4 +1,8 @@
 #import/setup
+import sys
+if len(sys.argv)>1 and sys.argv[1] in ("--keys", "--uninstall"): #key setup and uninstall (navi_setup.py), before the heavy imports
+    import navi_setup
+    sys.exit(navi_setup.main(sys.argv[1:]))
 import truststore
 truststore.inject_into_ssl() #use the windows certificate store (needed with AVG https scanning)
 from mailbox import Mailbox
@@ -34,9 +38,17 @@ import json
 import socket
 import inspect
 import base64
-import winreg
+try:
+    import winreg #windows only
+except ImportError:
+    winreg=None
 import ctypes
-from ctypes import wintypes
+try:
+    from ctypes import wintypes
+except (ImportError, ValueError): #not on every mac python: just the few types the structures below use
+    import types
+    wintypes=types.SimpleNamespace(DWORD=ctypes.c_uint32, LONG=ctypes.c_int32, WORD=ctypes.c_uint16, UINT=ctypes.c_uint,
+                                   BOOL=ctypes.c_int, HANDLE=ctypes.c_void_p, LPCWSTR=ctypes.c_wchar_p, LPWSTR=ctypes.c_wchar_p)
 import python_weather
 import threading
 import sounds #soft thinking / mode switch cues
@@ -146,6 +158,8 @@ agent_active=threading.Event() #ctrl+c kill switch is armed while this is set
 def user_env(name):
     #a variable saved with setx, read from windows directly: programs opened before it was saved (like a vs code
     #terminal) don't pass it on, so navi would otherwise not see a new key until they're restarted
+    if winreg is None:
+        return ""
     try:
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment") as k:
             return str(winreg.QueryValueEx(k, name)[0])
@@ -759,10 +773,12 @@ def set_start_with_windows(on):
     import subprocess
     exe=os.path.join(os.path.dirname(sys.executable), "pythonw.exe")
     script=os.path.abspath(__file__)
+    if getattr(sys, "frozen", False): #the installed Navi.exe opens itself, no python or script needed
+        exe, script=sys.executable, ""
     ps=("$s=(New-Object -ComObject WScript.Shell).CreateShortcut($env:NAVI_LINK); $s.TargetPath=$env:NAVI_EXE; "
-        "$s.Arguments='\"'+$env:NAVI_SCRIPT+'\"'; $s.WorkingDirectory=$env:NAVI_DIR; $s.Description='Navi voice assistant'; $s.Save()")
+        "if($env:NAVI_SCRIPT){$s.Arguments='\"'+$env:NAVI_SCRIPT+'\"'}; $s.WorkingDirectory=$env:NAVI_DIR; $s.Description='Navi voice assistant'; $s.Save()")
     env=dict(os.environ, NAVI_LINK=STARTUP_LINK, NAVI_EXE=exe if os.path.exists(exe) else sys.executable,
-             NAVI_SCRIPT=script, NAVI_DIR=os.path.dirname(script))
+             NAVI_SCRIPT=script, NAVI_DIR=os.path.dirname(script or exe))
     subprocess.run([extras.POWERSHELL, "-NoProfile", "-NonInteractive", "-Command", ps], env=env, check=True, timeout=30,
                    creationflags=0x08000000) #CREATE_NO_WINDOW
 
@@ -3523,14 +3539,17 @@ def minecraft_mode(key):
 briefing_lock=threading.Lock() #one briefing at a time
 briefing_speaking=threading.Event() #set while the briefing talks, so the listener doesn't take navi's voice for the user's
 briefing_ended=0.0
-desktop_dll=ctypes.WinDLL("user32") #own copy, so these argtypes don't touch anyone else's user32 calls
-desktop_dll.OpenInputDesktop.restype=wintypes.HANDLE
-desktop_dll.OpenInputDesktop.argtypes=[wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
-desktop_dll.GetUserObjectInformationW.argtypes=[wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD, ctypes.POINTER(wintypes.DWORD)]
-desktop_dll.CloseDesktop.argtypes=[wintypes.HANDLE]
+if IS_WINDOWS:
+    desktop_dll=ctypes.WinDLL("user32") #own copy, so these argtypes don't touch anyone else's user32 calls
+    desktop_dll.OpenInputDesktop.restype=wintypes.HANDLE
+    desktop_dll.OpenInputDesktop.argtypes=[wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    desktop_dll.GetUserObjectInformationW.argtypes=[wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD, ctypes.POINTER(wintypes.DWORD)]
+    desktop_dll.CloseDesktop.argtypes=[wintypes.HANDLE]
 
 def screen_locked():
     #true on the lock screen (after waking up, before signing in): that desktop can't be opened from here
+    if not IS_WINDOWS:
+        return False
     desk=desktop_dll.OpenInputDesktop(0, False, 0x0001) #DESKTOP_READOBJECTS
     if not desk:
         return True
