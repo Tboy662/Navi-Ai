@@ -73,7 +73,7 @@ The window opens and Navi starts listening right away.
 On a Mac, the first run asks for **Microphone** access for your terminal app; allow it. The orb also peeks at the screen behind it to adjust its colors, which needs **Screen Recording** access (System Settings > Privacy & Security). Without it everything still works and the orb just keeps its default colors.
 
 - Say **"Navi"** to wake it. It answers and waits for a command.
-- Commands: **"weather"**, **"mail"**, **"homework"** (or "canvas" / "assignment"), **"ai"**, **"restaurant"**.
+- Commands: **"weather"**, **"mail"**, **"homework"**, **"remind me..."**, **"what time is it"**, **"take a note"**, **"ai"** and many more. Say **"what can you do"**, or see [COMMANDS.md](COMMANDS.md) for the full list.
 - In AI mode, just talk. Say **"goodbye"** to leave AI mode. It also exits after 5 minutes of silence.
 - Say **"goodbye"** to put Navi back to sleep.
 - You can also type a question in the box at the bottom and press **Ask**, or use the Weather / Check mail / Homework buttons.
