@@ -5,9 +5,7 @@ if len(sys.argv)>1 and sys.argv[1] in ("--keys", "--uninstall"): #key setup and 
     sys.exit(navi_setup.main(sys.argv[1:]))
 import truststore
 truststore.inject_into_ssl() #use the windows certificate store (needed with AVG https scanning)
-from mailbox import Mailbox
 import tkinter as tk
-from tkinter import ttk
 from gtts import gTTS
 import os
 from dotenv import load_dotenv
@@ -54,10 +52,8 @@ import threading
 import sounds #soft thinking / mode switch cues
 import extras #time, calculator, conversions, notes, translate, web search, system status, power and more
 from imap_tools import MailBox
-import email
 from email.header import decode_header
 import requests
-from requests.structures import CaseInsensitiveDict
 
 from tkinter import scrolledtext
 import queue
@@ -181,34 +177,13 @@ class StopListening(Exception):
 def gui_post(kind, value):
     if gui_queue is not None:
         gui_queue.put((kind, value))
+def has_word(text, *words):
+    #whole word match, so "ai" doesn't fire on "rain" or "explain"
+    text=text.lower()
+    return any(re.search(r"\b"+re.escape(w)+r"\b", text) for w in words)
 def dummy_func():
     global b3
     b3=False
-def resturant_finder(key):
-    print("finder started")
-    
-
-    url = "https://api.geoapify.com/v2/places?categories=commercial.supermarket&filter=rect%3A10.716463143326969%2C48.755151258420966%2C10.835314015356737%2C48.680903341613316&limit=20&apiKey=" + key
-
-    headers = CaseInsensitiveDict()
-    headers["Accept"] = "application/json"
-
-    resp = requests.get(url, headers=headers)
-
-    print(resp)
-def dropdown(title,listvalues):
-    root = tk.Tk()
-    root.title(title)
-    if not isinstance(listvalues, list):
-        print("listvalues must be a list")
-        return
-    label = tk.Label(root, text="Select an option:")
-    label.pack()
-    combo = ttk.Combobox(root, values=listvalues)
-    combo.pack()
-    root.mainloop()
-
-
 def ai_mode(key):
     global t, b3
     t=threading.Timer(300, dummy_func)
@@ -227,8 +202,8 @@ def ai_loop(key):
     b3=True
     while b3==True:
         audio=convert_audio_to_text(get_mic_input())
-        if "goodbye" in audio.lower():
-            text_to_speech("A mode deactivated. Goodbye!")
+        if has_word(audio, "goodbye"):
+            text_to_speech("AI mode deactivated. Goodbye!")
             b3=False
         else:
             text=audio
@@ -1016,7 +991,7 @@ def voice_chat(chat, greeting, opener=None):
             text=convert_audio_to_text(get_mic_input())
             if not text:
                 continue
-            if "goodbye" in text.lower():
+            if has_word(text, "goodbye"):
                 text_to_speech("Leaving this mode. Goodbye!")
                 return
             text_to_speech(chat_reply(chat, text))
@@ -3305,7 +3280,7 @@ class GoalListener(threading.Thread):
                     except (sr.UnknownValueError, sr.RequestError):
                         continue
                     gui_post("you", text)
-                    if GOAL_STOP.search(text) or "goodbye" in text.lower():
+                    if GOAL_STOP.search(text) or has_word(text, "goodbye"):
                         self.stop.set()
                         try:
                             mc_request("stop", timeout=5) #let go of everything right now
@@ -3424,7 +3399,7 @@ def goal_rounds(chat):
             if reply and not listener.stop.is_set():
                 listener.say(reply)
             for text in listener.take():
-                if "goodbye" in text.lower():
+                if has_word(text, "goodbye"):
                     leave="goodbye"
                     goal_running.clear()
                     break
@@ -3451,7 +3426,7 @@ def minecraft_voice(chat, greeting):
             text=convert_audio_to_text(get_mic_input())
             if not text:
                 continue
-            if "goodbye" in text.lower():
+            if has_word(text, "goodbye"):
                 text_to_speech("Leaving this mode. Goodbye!")
                 return
             text_to_speech(chat_reply(chat, text))
@@ -5561,7 +5536,7 @@ extras_context=extras.Context(say=lambda text, lang="en": text_to_speech(text, l
 def handle_command(text):
     global navi
     t=text.lower()
-    if "goodbye" in t:
+    if has_word(t, "goodbye"):
         text_to_speech(random_message("goodbye"))
         navi=False
         gui_post("awake", False)
@@ -5600,15 +5575,15 @@ def handle_command(text):
         open_command(text)
     elif re.search(r"\bgrades?\b|\bhow am i doing\b|\bannouncements?\b|\bfeedback\b|\bcomments?\b", t):
         canvas_command(text)
-    elif "minecraft" in text.lower():
+    elif has_word(t, "minecraft"):
         minecraft_mode(ai_api_key)
-    elif "study" in text.lower():
+    elif has_word(t, "study", "studying"):
         study_mode(ai_api_key)
-    elif "agent" in text.lower():
+    elif has_word(t, "agent", "agents"):
         agent_mode(ai_api_key)
     elif re.search(r"\b(tests?|exams?|quiz|quizzes)\b", text.lower()):
         text_to_speech(get_tests())
-    elif "homework" in text.lower() or "canvas" in text.lower() or "assignment" in text.lower():
+    elif has_word(t, "homework", "canvas", "assignment", "assignments"):
         text_to_speech(get_homework())
     elif re.search(r"\bai\b|\ba\.i\b|\bartificial intelligence\b", t): #the word "ai", not "ai" inside rain or explain
         ai_mode(ai_api_key)
@@ -5628,7 +5603,7 @@ def assistant_loop():
             if briefing_heard() or training_active.is_set(): #navi's own voice from the speakers, or you reading training sentences
                 continue
             audio=convert_audio_to_text(heard)
-        if bot_name in audio.lower():
+        if has_word(audio, bot_name):
             navi=True
             gui_post("awake", True)
             text_to_speech(random_message("greeting"))
