@@ -1,0 +1,28 @@
+# Secrets
+.env
+*.bak
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Personal data, tokens and runtime state
+navi_settings.json
+navi_memory.json
+ai_model_status.json
+*.lnk
+
+# Large local folders (venvs, models, browser, mod workspace)
+voice_clone/
+voice_profile/
+vosk_model/
+vosk_spk_model/
+agent_browser/
+minecraft_mod/
+
+# Generated audio
+*.wav
+*.mp3
+!sounds/*.wav
