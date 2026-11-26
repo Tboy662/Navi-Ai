@@ -77,6 +77,8 @@ Navi reads its keys from a `.env` file next to `voice.py`. Copy `.env.example` t
 | `CANVAS_API_KEY` | The "homework" command | In Canvas go to Account > Settings > New Access Token. |
 | `GEOAPIFY_API_KEY` | The "restaurant" command (work in progress) | A [Geoapify](https://www.geoapify.com/) API key. |
 
+You can also view and change every key in Navi under **Settings > Keys**: they're hidden until you press Show, and saving puts them to use right away without a restart.
+
 Real environment variables with the same names also work and take priority over `.env`.
 
 Weather needs no key. It currently reports New York; change the city in `get_weather()` if you want somewhere else.

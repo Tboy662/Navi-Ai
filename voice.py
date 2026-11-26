@@ -6015,6 +6015,28 @@ class NaviGUI:
             agent_browser.close()
         self.root.destroy()
 
+def apply_keys(values):
+    #puts freshly saved keys to use without a restart: the environment (ai providers, hugging face) and the
+    #variables read when navi started
+    global ai_api_key, restaurant_api_key, MAIL_USER, MAIL_PASSWORD, CANVAS_URL, CANVAS_API_KEY
+    for name, value in values.items():
+        if value:
+            os.environ[name]=value
+        else:
+            os.environ.pop(name, None)
+    ai_api_key=values.get("GEMINI_API_KEY", ai_api_key)
+    restaurant_api_key=values.get("GEOAPIFY_API_KEY", restaurant_api_key)
+    MAIL_USER=values.get("MAIL_USER", MAIL_USER)
+    MAIL_PASSWORD=values.get("MAIL_PASSWORD", MAIL_PASSWORD)
+    CANVAS_URL=values.get("CANVAS_URL", CANVAS_URL)
+    CANVAS_API_KEY=values.get("CANVAS_API_KEY", CANVAS_API_KEY)
+
+def open_folder(path):
+    if IS_WINDOWS:
+        os.startfile(path)
+    else:
+        subprocess.Popen(["open" if IS_MAC else "xdg-open", path])
+
 class SettingsWindow:
     #voice, day briefing and startup options. Every change applies and saves right away
     window=None #the open one, so the button doesn't open a second
@@ -6046,7 +6068,7 @@ class SettingsWindow:
         for name, build in (("Voice", self.voice_page), ("Voice training", self.training_page), ("Messages", self.messages_page),
                             ("Listening", self.listening_page),
                             ("Day briefing", self.briefing_page), ("Location", self.location_page),
-                            ("Phone alerts", self.phone_page), ("Calendar", self.calendar_page), ("Memory", self.memory_page),
+                            ("Phone alerts", self.phone_page), ("Keys", self.keys_page), ("Calendar", self.calendar_page), ("Memory", self.memory_page),
                             ("Startup", self.startup_page)):
             self.body=tk.Frame(stack, bg=c["bg"])
             self.body.grid(row=0, column=0, sticky="nsew")
@@ -6348,6 +6370,54 @@ class SettingsWindow:
         self.in_background(lambda: phone_alert("Navi", "This is a test. Phone alerts work!", force=True),
                            lambda ok: self.phone_status.configure(text="Sent. It should be on your phone now." if ok is True
                                                                   else "Couldn't send it. Check your internet."))
+
+    def keys_page(self):
+        #every api key in .env: hidden until you press Show, saved to .env and used straight away (no restart)
+        import navi_setup
+        c=NaviGUI.COLORS
+        self.section("API keys")
+        self.label("The keys I use for the AI, mail, homework and more. They're saved only on this PC, in the .env file "
+                   "in my folder. Leave one empty to turn that feature off. Get opens the page where you make it.")
+        saved=navi_setup.read_env(os.path.join(DATA_DIR, ".env"))
+        grid=tk.Frame(self.body, bg=c["bg"])
+        grid.grid(row=self.row, column=0, columnspan=2, sticky="w", pady=(4,0))
+        self.row+=1
+        self.key_entries={}
+        r=0
+        for page in navi_setup.PAGES:
+            link=page["links"][-1][1] if page.get("links") else None
+            for name, label, secret, _ in page.get("fields", []):
+                tk.Label(grid, text=label, font=(UI_FONT,10), fg=c["text"], bg=c["bg"]).grid(row=r, column=0, sticky="w", padx=(0,10), pady=2)
+                e=self.entry(grid, 34)
+                e.insert(0, saved.get(name, os.environ.get(name, "")))
+                if secret:
+                    e.configure(show="•")
+                e.grid(row=r, column=1, sticky="w", ipady=3, pady=2)
+                if secret:
+                    shown=tk.BooleanVar(value=False)
+                    tk.Checkbutton(grid, text="Show", variable=shown, command=lambda e=e, v=shown: e.configure(show="" if v.get() else "•"),
+                                   font=(UI_FONT,9), fg=c["muted"], bg=c["bg"], selectcolor=c["panel"], activebackground=c["bg"],
+                                   activeforeground=c["text"], highlightthickness=0, bd=0, cursor="hand2").grid(row=r, column=2, padx=(6,0))
+                if link and link!="canvas:" and name==page["fields"][-1][0]:
+                    get=self.gui.make_button(grid, "Get", lambda u=link: webbrowser.open(u))
+                    get.configure(padx=10, pady=1, font=(UI_FONT,9))
+                    get.grid(row=r, column=3, padx=(6,0))
+                self.key_entries[name]=e
+                r+=1
+        self.buttons(("Save keys", self.save_keys, True), ("Open my folder", lambda: open_folder(DATA_DIR), False))
+        self.keys_status=self.label("")
+
+    def save_keys(self):
+        import navi_setup
+        values={name: e.get().strip() for name, e in self.key_entries.items()}
+        try:
+            navi_setup.write_env(os.path.join(DATA_DIR, ".env"), values)
+        except OSError as e:
+            self.keys_status.configure(text=f"Couldn't save the keys: {e}")
+            return
+        apply_keys(values)
+        have=sum(1 for v in values.values() if v)
+        self.keys_status.configure(text=f"Saved. {have} of {len(values)} keys are set, and I'm using them now.")
 
     def calendar_page(self):
         self.section("Google Calendar")
