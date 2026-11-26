@@ -12,6 +12,13 @@ venv/
 navi_settings.json
 navi_memory.json
 ai_model_status.json
+navi_notes.json
+navi_lists.json
+navi_reminders.json
+google_token.json
+google_credentials.json
+client_secret*.json
+*.tmp
 *.lnk
 
 # Large local folders (venvs, models, browser, mod workspace)

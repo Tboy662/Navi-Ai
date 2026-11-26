@@ -40,6 +40,7 @@ from ctypes import wintypes
 import python_weather
 import threading
 import sounds #soft thinking / mode switch cues
+import extras #time, calculator, conversions, notes, translate, web search, system status, power and more
 from imap_tools import MailBox
 import email
 from email.header import decode_header
@@ -445,6 +446,7 @@ def chat_request(entry, payload, started):
             raise AIError(r.status_code, error_text(r)[:300],
                           reset/1000 if reset and reset>1e11 else time.time()+retry if retry else None)
         content, calls, details=[], {}, {}
+        r.encoding="utf-8" #the stream is utf-8; without a charset in its header requests would read it as latin-1 ("dÃ­as")
         for line in r.iter_lines(decode_unicode=True):
             if not line or not line.startswith("data:"):
                 continue #": OPENROUTER PROCESSING" keep-alives aren't an answer
@@ -761,12 +763,17 @@ def set_start_with_windows(on):
         "$s.Arguments='\"'+$env:NAVI_SCRIPT+'\"'; $s.WorkingDirectory=$env:NAVI_DIR; $s.Description='Navi voice assistant'; $s.Save()")
     env=dict(os.environ, NAVI_LINK=STARTUP_LINK, NAVI_EXE=exe if os.path.exists(exe) else sys.executable,
              NAVI_SCRIPT=script, NAVI_DIR=os.path.dirname(script))
-    subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", ps], env=env, check=True, timeout=30,
+    subprocess.run([extras.POWERSHELL, "-NoProfile", "-NonInteractive", "-Command", ps], env=env, check=True, timeout=30,
                    creationflags=0x08000000) #CREATE_NO_WINDOW
+
+last_spoken="" #for "repeat that"
 
 def text_to_speech(text, lang='en', voice=None):
     #voice: say it in this voice instead of the one in the settings (like trying the trained voice)
+    global last_spoken
     gui_post("navi", text)
+    if lang=="en":
+        last_spoken=text
     with speak_lock:
         gui_post("status", "speaking")
         filename = "output.mp3"
@@ -4157,6 +4164,8 @@ def reminder_watcher():
         for r in sorted(due, key=lambda r: r["due"]):
             if r.get("kind")=="timer":
                 msg=f"Time's up! Your {duration_text(r.get('length', 0), adjective=True)} timer is done."
+                if r.get("what"): #a focus timer: "time to take a short break..."
+                    msg+=f" Time to {r['what']}."
             else:
                 msg=f"Reminder: {r.get('what') or 'you asked me to remind you now'}."
             if now-r["due"]>120:
@@ -4165,6 +4174,12 @@ def reminder_watcher():
             for _ in range(3 if r.get("kind")=="timer" else 1):
                 winsound.PlaySound("SystemExclamation", winsound.SND_ALIAS)
             briefing_say(msg)
+
+def add_timer(seconds, what=""):
+    #a timer that goes off like the ones set by voice (used by the focus timer)
+    item={"id": secrets.token_hex(4), "kind": "timer", "what": what, "due": time.time()+seconds, "length": seconds, "made": time.time()}
+    with reminder_lock:
+        save_json(REMINDER_FILE, reminders()+[item])
 
 def reminders_today():
     from datetime import datetime, timedelta
@@ -4233,7 +4248,7 @@ def windows_location():
         "if($l.IsUnknown){'none'}else{$c=[Globalization.CultureInfo]::InvariantCulture; "
         "$l.Latitude.ToString($c)+','+$l.Longitude.ToString($c)+','+$l.HorizontalAccuracy.ToString($c)}")
     try:
-        out=subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", ps], capture_output=True, text=True,
+        out=subprocess.run([extras.POWERSHELL, "-NoProfile", "-NonInteractive", "-Command", ps], capture_output=True, text=True,
                            timeout=30, creationflags=0x08000000).stdout.strip()
         lat, lon, accuracy=(float(x) for x in out.split(","))
         return lat, lon, accuracy
@@ -4407,7 +4422,7 @@ def installed_apps():
     global start_apps
     if start_apps is None:
         import subprocess
-        out=subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command",
+        out=subprocess.run([extras.POWERSHELL, "-NoProfile", "-NonInteractive", "-Command",
                             "[Console]::OutputEncoding=[Text.Encoding]::UTF8; Get-StartApps | ConvertTo-Json -Compress"],
                            capture_output=True, encoding="utf-8", errors="replace", timeout=60, creationflags=0x08000000).stdout
         try:
@@ -4432,7 +4447,7 @@ def open_command(text):
         hit=lower.get(name) or next((lower[n] for n in lower if n.startswith(name+" ") or n.endswith(" "+name)), None)
         hit=hit or next((lower[n] for n in difflib.get_close_matches(name, list(lower), n=1, cutoff=0.75)), None)
         if hit:
-            subprocess.Popen(["explorer.exe", "shell:AppsFolder\\"+apps[hit]])
+            subprocess.Popen([extras.EXPLORER, "shell:AppsFolder\\"+apps[hit]])
             text_to_speech(f"Opening {hit}.")
             return
     url=WEBSITES.get(name) or (("https://"+name.replace(" ", "")) if re.search(r"\.[a-z]{2,}$", name) else None)
@@ -5496,6 +5511,11 @@ def start_everyday_tools():
         threading.Thread(target=TrainedVoice.ask, args=({"cmd": "ping"},), daemon=True).start()
 
 #command area
+extras_context=extras.Context(say=lambda text, lang="en": text_to_speech(text, lang), hear=lambda: hear(), said_yes=said_yes,
+                              ai_text=lambda prompt: ai_text(prompt), add_timer=lambda seconds, what="": add_timer(seconds, what),
+                              last_reply=lambda: last_spoken, data_path=lambda name: data_path(name), post=gui_post,
+                              passthrough=(StopListening,))
+
 def handle_command(text):
     global navi
     t=text.lower()
@@ -5503,6 +5523,8 @@ def handle_command(text):
         text_to_speech(random_message("goodbye"))
         navi=False
         gui_post("awake", False)
+    elif extras.handle(text, extras_context): #time, calculator, conversions, notes, translate, search, system, power...
+        pass
     elif re.search(r"\bremember\b|\bforget\b|\bwhat do you know about me\b", t):
         memory_command(text)
     elif re.search(r"\bremind|\breminders?\b|\btimers?\b|\balarms?\b", t):
@@ -5871,7 +5893,7 @@ class NaviGUI:
             elif kind=="awake":
                 self.awake=value
                 self.update_orb()
-                self.awake_text.configure(text="Awake - try: brief me, remind me, my list, my calendar, weather, check my mail, draft an email, my grades, open an app, volume, homework, goodbye" if value
+                self.awake_text.configure(text="Awake - try: brief me, remind me, weather, check my mail, what can you do, what time is it, take a note, 5 miles in km, goodbye" if value
                                           else f'Say "{bot_name}" to wake me up')
             elif kind=="stopped":
                 self.worker=None
