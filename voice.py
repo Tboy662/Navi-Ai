@@ -803,6 +803,8 @@ def get_mic_input():
     profile=voice_profile()
     if profile and profile.get("energy_threshold"): #how loud your voice and room are, from voice training
         rec.energy_threshold=profile["energy_threshold"]
+    rec.pause_threshold=1.5 #seconds of quiet before navi stops listening (default 0.8 cut people off mid-sentence)
+    rec.non_speaking_duration=0.5
     with sr.Microphone() as source:
         print("Listening...")
         gui_post("status", "listening")
