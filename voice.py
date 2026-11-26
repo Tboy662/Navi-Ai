@@ -14,9 +14,15 @@ import time
 import urllib.parse
 import mimetypes
 import sys
-from playsound import playsound
-import pyaudiowpatch as pyaudio
-sys.modules['pyaudio'] = pyaudio
+import subprocess
+IS_WINDOWS=sys.platform=="win32"
+IS_MAC=sys.platform=="darwin"
+if not IS_MAC:
+    from playsound import playsound
+if IS_WINDOWS:
+    import pyaudiowpatch as pyaudio #windows-only pyaudio fork
+    sys.modules['pyaudio'] = pyaudio
+#on mac speech_recognition uses the normal pyaudio package and replies play through afplay
 import speech_recognition as sr
 import asyncio
 import random
@@ -33,6 +39,7 @@ import ctypes
 from ctypes import wintypes
 import python_weather
 import threading
+import sounds #soft thinking / mode switch cues
 from imap_tools import MailBox
 import email
 from email.header import decode_header
@@ -714,12 +721,16 @@ def make_speech(text, filename, lang="en"):
             print("edge voice err; {0}".format(e)) #falls back to the google voice
     gTTS(text=text, lang=lang, tld=name if engine=="google" else "com", slow=settings["speed"]<=-30).save(filename)
 
-winmm=ctypes.WinDLL("winmm")
-winmm.mciSendStringW.argtypes=[wintypes.LPCWSTR, wintypes.LPWSTR, wintypes.UINT, wintypes.HANDLE]
+if IS_WINDOWS:
+    winmm=ctypes.WinDLL("winmm")
+    winmm.mciSendStringW.argtypes=[wintypes.LPCWSTR, wintypes.LPWSTR, wintypes.UINT, wintypes.HANDLE]
 
 def play_audio(filename):
     #plays an mp3 at the volume from the settings (playsound can't change the volume). It stops early when
     #stop_talking is set: the stop button, or saying "stop"
+    if IS_MAC:
+        subprocess.run(["afplay", filename])
+        return
     if winmm.mciSendStringW(f'open "{os.path.abspath(filename)}" type mpegvideo alias navi_voice', None, 0, None):
         playsound(filename)
         return
@@ -5359,14 +5370,14 @@ class VoiceTrainingWindow:
         self.win.protocol("WM_DELETE_WINDOW", self.close)
         body=tk.Frame(self.win, bg=c["bg"])
         body.pack(fill="both", expand=True, padx=24, pady=20)
-        self.step_text=tk.Label(body, font=("Segoe UI",10), fg=c["muted"], bg=c["bg"], anchor="w")
+        self.step_text=tk.Label(body, font=(UI_FONT,10), fg=c["muted"], bg=c["bg"], anchor="w")
         self.step_text.pack(fill="x")
-        self.say=tk.Label(body, font=("Segoe UI",16), fg=c["text"], bg=c["bg"], wraplength=560, justify="left", anchor="w", height=4)
+        self.say=tk.Label(body, font=(UI_FONT,16), fg=c["text"], bg=c["bg"], wraplength=560, justify="left", anchor="w", height=4)
         self.say.pack(fill="x", pady=(6,10))
         self.meter=tk.Canvas(body, width=560, height=12, bg=c["panel"], highlightthickness=0)
         self.meter.pack(fill="x")
         self.bar=self.meter.create_rectangle(0, 0, 0, 12, fill=c["accent"], outline="")
-        self.status=tk.Label(body, font=("Segoe UI",10), fg=c["muted"], bg=c["bg"], wraplength=560, justify="left", anchor="w")
+        self.status=tk.Label(body, font=(UI_FONT,10), fg=c["muted"], bg=c["bg"], wraplength=560, justify="left", anchor="w")
         self.status.pack(fill="x", pady=(8,12))
         buttons=tk.Frame(body, bg=c["bg"])
         buttons.pack(fill="x")
@@ -5561,6 +5572,7 @@ def assistant_loop():
                 handle_command(convert_audio_to_text(get_mic_input()))
 
 #gui area
+UI_FONT="Segoe UI" if IS_WINDOWS else "Helvetica Neue" if IS_MAC else "TkDefaultFont"
 class BLENDFUNCTION(ctypes.Structure):
     _fields_=[("BlendOp",ctypes.c_ubyte),("BlendFlags",ctypes.c_ubyte),("SourceConstantAlpha",ctypes.c_ubyte),("AlphaFormat",ctypes.c_ubyte)]
 class BITMAPINFOHEADER(ctypes.Structure):
@@ -5599,7 +5611,10 @@ class StatusOrb:
         self.bg_target=0.0
         yy,xx=np.mgrid[0:s,0:s].astype(np.float32)
         self.xx,self.yy=xx,yy
-        self.setup_layered()
+        if IS_WINDOWS:
+            self.setup_layered()
+        else:
+            self.setup_mac()
         self.sample_background()
         self.animate()
 
@@ -5616,6 +5631,8 @@ class StatusOrb:
             right,bottom=rect.right,rect.bottom
         except Exception:
             pass
+        if IS_MAC:
+            bottom=self.win.winfo_screenheight()-80 #leave room for the dock
         return right-self.SIZE-4, bottom-self.SIZE-4
 
     def setup_layered(self):
@@ -5642,6 +5659,34 @@ class StatusOrb:
         gdi32.SelectObject(self.mem_dc, bmp)
         self.screen_dc=user32.GetDC(None)
         self.blend=BLENDFUNCTION(0, 0, 255, 1) #AC_SRC_OVER, use per-pixel alpha
+
+    def setup_mac(self):
+        #tk on macos can make a window fully transparent, so the orb is just an rgba image on it
+        from PIL import ImageTk
+        self.ImageTk=ImageTk
+        self.win.attributes("-transparent", True)
+        self.win.configure(bg="systemTransparent")
+        self.label=tk.Label(self.win, bg="systemTransparent", bd=0, highlightthickness=0)
+        self.label.pack()
+        self.photo=None
+
+    def show_mac(self, rgb, alpha):
+        #tk wants straight (not premultiplied) alpha
+        from PIL import Image
+        straight=rgb/np.maximum(alpha, 1e-6)[...,None]
+        rgba=np.dstack((straight, alpha))
+        img=Image.fromarray((np.clip(rgba,0,1)*255).astype(np.uint8), "RGBA")
+        self.photo=self.ImageTk.PhotoImage(img) #keep a reference or tk drops the image
+        self.label.configure(image=self.photo)
+
+    def show_windows(self, rgb, alpha):
+        s=self.SIZE
+        bgra=np.dstack((rgb[...,2], rgb[...,1], rgb[...,0], alpha))
+        buf=(np.clip(bgra,0,1)*255).astype(np.uint8).tobytes()
+        ctypes.memmove(self.bits, buf, len(buf))
+        ctypes.windll.user32.UpdateLayeredWindow(self.hwnd, self.screen_dc,
+            ctypes.byref(wintypes.POINT(self.x,self.y)), ctypes.byref(wintypes.SIZE(s,s)),
+            self.mem_dc, ctypes.byref(wintypes.POINT(0,0)), 0, ctypes.byref(self.blend), 2) #ULW_ALPHA
 
     def sample_background(self):
         #look at a strip just left of the orb so colors can lighten/darken to stay visible
@@ -5693,13 +5738,18 @@ class StatusOrb:
         #tone map on the brightest channel so overlaps glow without shifting the hue, then premultiply
         peak=np.maximum(light.max(axis=2), 1e-6)
         rgb=light*((1-np.exp(-peak*1.3))/peak*alpha)[...,None]
-        bgra=np.dstack((rgb[...,2], rgb[...,1], rgb[...,0], alpha))
-        buf=(np.clip(bgra,0,1)*255).astype(np.uint8).tobytes()
-        ctypes.memmove(self.bits, buf, len(buf))
-        ctypes.windll.user32.UpdateLayeredWindow(self.hwnd, self.screen_dc,
-            ctypes.byref(wintypes.POINT(self.x,self.y)), ctypes.byref(wintypes.SIZE(s,s)),
-            self.mem_dc, ctypes.byref(wintypes.POINT(0,0)), 0, ctypes.byref(self.blend), 2) #ULW_ALPHA
+        if IS_WINDOWS:
+            self.show_windows(rgb, alpha)
+        else:
+            self.show_mac(rgb, alpha)
         self.win.after(33, self.animate)
+
+class NoOrb:
+    #other systems can't draw a see-through window, so they skip the orb
+    def set_state(self, state):
+        pass
+    def set_loud(self, loud):
+        pass
 
 class NaviGUI:
     COLORS={"bg":"#1e1f26","panel":"#2a2c36","text":"#e6e6eb","muted":"#8b8d98",
@@ -5722,28 +5772,28 @@ class NaviGUI:
         #header: name + status light
         header=tk.Frame(root, bg=c["bg"])
         header.pack(fill="x", padx=16, pady=(16,8))
-        tk.Label(header, text=bot_name.upper(), font=("Segoe UI",20,"bold"),
+        tk.Label(header, text=bot_name.upper(), font=(UI_FONT,20,"bold"),
                  fg=c["text"], bg=c["bg"]).pack(side="left")
         self.make_button(header, "Settings", lambda: SettingsWindow.open(self)).pack(side="right", padx=(6,0))
         self.make_button(header, "Stop", stop_talking.set).pack(side="right", padx=(12,0)) #cuts navi off mid-sentence
-        self.status_text=tk.Label(header, font=("Segoe UI",11), fg=c["muted"], bg=c["bg"])
+        self.status_text=tk.Label(header, font=(UI_FONT,11), fg=c["muted"], bg=c["bg"])
         self.status_text.pack(side="right")
         self.dot=tk.Canvas(header, width=14, height=14, bg=c["bg"], highlightthickness=0)
         self.dot_id=self.dot.create_oval(2,2,12,12, outline="")
         self.dot.pack(side="right", padx=6)
         self.awake_text=tk.Label(root, text=f'Say "{bot_name}" to wake me up',
-                                 font=("Segoe UI",10), fg=c["muted"], bg=c["bg"], anchor="w", justify="left", wraplength=470)
+                                 font=(UI_FONT,10), fg=c["muted"], bg=c["bg"], anchor="w", justify="left", wraplength=470)
         self.awake_text.pack(fill="x", padx=16)
 
         #conversation log
         #small asked-for size: it still fills the window, but leaves room for the buttons and the type box below it
-        self.log=scrolledtext.ScrolledText(root, wrap="word", font=("Segoe UI",11), width=40, height=8,
+        self.log=scrolledtext.ScrolledText(root, wrap="word", font=(UI_FONT,11), width=40, height=8,
                                            bg=c["panel"], fg=c["text"], relief="flat",
                                            padx=10, pady=10, state="disabled")
         self.log.pack(fill="both", expand=True, padx=16, pady=8)
         for tag in ("you","navi","system"):
             self.log.tag_config(tag, foreground=c[tag])
-        self.log.tag_config("name", font=("Segoe UI",11,"bold"))
+        self.log.tag_config("name", font=(UI_FONT,11,"bold"))
 
         #buttons
         buttons=tk.Frame(root, bg=c["bg"])
@@ -5757,7 +5807,7 @@ class NaviGUI:
         #typed questions go straight to the ai
         entry_row=tk.Frame(root, bg=c["bg"])
         entry_row.pack(fill="x", padx=16, pady=(8,16))
-        self.entry=tk.Entry(entry_row, font=("Segoe UI",11), bg=c["panel"], fg=c["text"],
+        self.entry=tk.Entry(entry_row, font=(UI_FONT,11), bg=c["panel"], fg=c["text"],
                             insertbackground=c["text"], relief="flat")
         self.entry.pack(side="left", fill="x", expand=True, ipady=6)
         self.entry.bind("<Return>", lambda e: self.send_text())
@@ -5769,7 +5819,7 @@ class NaviGUI:
         self.ai=False
         self.processing=False
         self.typed=False
-        self.orb=StatusOrb(root)
+        self.orb=StatusOrb(root) if IS_WINDOWS or IS_MAC else NoOrb()
 
         self.set_status("stopped")
         self.add_line("system", f'Always listening. Say "{bot_name}" or type a question below.')
@@ -5779,7 +5829,7 @@ class NaviGUI:
 
     def make_button(self, parent, text, command, color=None):
         c=self.COLORS
-        return tk.Button(parent, text=text, command=command, font=("Segoe UI",10),
+        return tk.Button(parent, text=text, command=command, font=(UI_FONT,10),
                          bg=color or c["panel"], fg=c["text"], activebackground=c["accent"],
                          activeforeground=c["text"], relief="flat", padx=12, pady=6, cursor="hand2")
 
@@ -5842,6 +5892,14 @@ class NaviGUI:
         else:
             state="active" if self.awake else "inactive"
         self.orb.set_state(state)
+        #soft cues: a chime when the mode changes (asleep / awake / ai modes), a blip when it starts thinking
+        mode="ai" if self.ai else "awake" if self.awake else "asleep"
+        if mode!=getattr(self, "last_mode", "asleep"):
+            sounds.play("mode")
+        elif busy and not getattr(self, "was_busy", False):
+            sounds.play("thinking")
+        self.last_mode=mode
+        self.was_busy=busy
 
     def start_listening(self):
         if self.worker is None and not stop_event.is_set():
@@ -5931,7 +5989,7 @@ class SettingsWindow:
             self.row=0
             build()
             self.pages[name]=self.body
-            self.tabs[name]=tk.Button(side, text=name, anchor="w", command=lambda n=name: self.show_page(n), font=("Segoe UI",10),
+            self.tabs[name]=tk.Button(side, text=name, anchor="w", command=lambda n=name: self.show_page(n), font=(UI_FONT,10),
                                       bg=c["panel"], fg=c["text"], activebackground=c["accent"], activeforeground=c["text"],
                                       relief="flat", bd=0, padx=18, pady=8, width=12, cursor="hand2")
             self.tabs[name].pack(fill="x")
@@ -5967,7 +6025,7 @@ class SettingsWindow:
 
     def label(self, text, muted=True, width=430):
         c=NaviGUI.COLORS
-        l=tk.Label(self.body, text=text, font=("Segoe UI",9 if muted else 10), fg=c["muted" if muted else "text"], bg=c["bg"],
+        l=tk.Label(self.body, text=text, font=(UI_FONT,9 if muted else 10), fg=c["muted" if muted else "text"], bg=c["bg"],
                    justify="left", wraplength=width)
         l.grid(row=self.row, column=0, columnspan=2, sticky="w", pady=(2,4))
         self.row+=1
@@ -5975,11 +6033,11 @@ class SettingsWindow:
 
     def entry(self, parent, width=30):
         c=NaviGUI.COLORS
-        return tk.Entry(parent, width=width, font=("Segoe UI",10), bg=c["panel"], fg=c["text"], insertbackground=c["text"], relief="flat")
+        return tk.Entry(parent, width=width, font=(UI_FONT,10), bg=c["panel"], fg=c["text"], insertbackground=c["text"], relief="flat")
 
     def radio(self, text, var, value, command):
         c=NaviGUI.COLORS
-        tk.Radiobutton(self.body, text=text, variable=var, value=value, command=command, font=("Segoe UI",10), fg=c["text"],
+        tk.Radiobutton(self.body, text=text, variable=var, value=value, command=command, font=(UI_FONT,10), fg=c["text"],
                        bg=c["bg"], selectcolor=c["panel"], activebackground=c["bg"], activeforeground=c["text"],
                        highlightthickness=0, bd=0, cursor="hand2").grid(row=self.row, column=0, columnspan=2, sticky="w", pady=1)
         self.row+=1
@@ -6006,14 +6064,14 @@ class SettingsWindow:
         self.voice=tk.StringVar(value=VOICES[settings["voice"]])
         menu=tk.OptionMenu(self.body, self.voice, *self.voice_ids, command=lambda name: self.pick_voice())
         menu.configure(bg=c["panel"], fg=c["text"], activebackground=c["accent"], activeforeground=c["text"],
-                       highlightthickness=0, relief="flat", width=28, anchor="w", font=("Segoe UI",10))
-        menu["menu"].configure(bg=c["panel"], fg=c["text"], activebackground=c["accent"], activeforeground=c["text"], font=("Segoe UI",10))
+                       highlightthickness=0, relief="flat", width=28, anchor="w", font=(UI_FONT,10))
+        menu["menu"].configure(bg=c["panel"], fg=c["text"], activebackground=c["accent"], activeforeground=c["text"], font=(UI_FONT,10))
         self.place("Voice", menu)
         self.sliders={}
         self.slider("Speed", "speed", -50, 100, 10)
         self.slider("Pitch", "pitch", -50, 50, 5)
         self.slider("Volume", "volume", 0, 100, 5)
-        self.note=tk.Label(self.body, font=("Segoe UI",9), fg=c["muted"], bg=c["bg"], justify="left", wraplength=360)
+        self.note=tk.Label(self.body, font=(UI_FONT,9), fg=c["muted"], bg=c["bg"], justify="left", wraplength=360)
         self.note.grid(row=self.row, column=0, columnspan=2, sticky="w", pady=(2,4))
         self.row+=1
         buttons=tk.Frame(self.body, bg=c["bg"])
@@ -6122,7 +6180,7 @@ class SettingsWindow:
         self.check("Brief me when the PC wakes from sleep", "brief_on_wake")
         self.minutes=tk.StringVar(value=str(settings["wake_minutes"]))
         spin=tk.Spinbox(self.body, from_=1, to=240, width=5, textvariable=self.minutes, command=self.set_minutes,
-                        font=("Segoe UI",10), bg=c["panel"], fg=c["text"], buttonbackground=c["panel"],
+                        font=(UI_FONT,10), bg=c["panel"], fg=c["text"], buttonbackground=c["panel"],
                         insertbackground=c["text"], relief="flat", justify="center")
         spin.bind("<KeyRelease>", lambda e: self.set_minutes())
         self.place("Only after sleeping (min)", spin)
@@ -6267,7 +6325,7 @@ class SettingsWindow:
         self.section("Memory")
         self.label("Things I remember about you and use when I answer. You can also say: remember that..., what do you "
                    "remember, or forget...")
-        self.memory_list=tk.Listbox(self.body, width=58, height=10, font=("Segoe UI",10), bg=c["panel"], fg=c["text"],
+        self.memory_list=tk.Listbox(self.body, width=58, height=10, font=(UI_FONT,10), bg=c["panel"], fg=c["text"],
                                     selectbackground=c["accent"], relief="flat", highlightthickness=0, activestyle="none")
         self.memory_list.grid(row=self.row, column=0, columnspan=2, sticky="w", pady=(4,4))
         self.row+=1
@@ -6309,34 +6367,34 @@ class SettingsWindow:
         c=NaviGUI.COLORS
         right=tk.Frame(self.body, bg=c["bg"])
         right.grid(row=0, column=0, sticky="nw")
-        tk.Label(right, text="Messages", font=("Segoe UI",12,"bold"), fg=c["navi"], bg=c["bg"]).pack(anchor="w", pady=(0,4))
+        tk.Label(right, text="Messages", font=(UI_FONT,12,"bold"), fg=c["navi"], bg=c["bg"]).pack(anchor="w", pady=(0,4))
         self.kind_ids={name: kind for kind, (name, when) in MESSAGE_KINDS.items()}
         self.kind=tk.StringVar(value=MESSAGE_KINDS["greeting"][0])
         menu=tk.OptionMenu(right, self.kind, *self.kind_ids, command=lambda name: self.show_messages())
         menu.configure(bg=c["panel"], fg=c["text"], activebackground=c["accent"], activeforeground=c["text"],
-                       highlightthickness=0, relief="flat", width=24, anchor="w", font=("Segoe UI",10))
-        menu["menu"].configure(bg=c["panel"], fg=c["text"], activebackground=c["accent"], activeforeground=c["text"], font=("Segoe UI",10))
+                       highlightthickness=0, relief="flat", width=24, anchor="w", font=(UI_FONT,10))
+        menu["menu"].configure(bg=c["panel"], fg=c["text"], activebackground=c["accent"], activeforeground=c["text"], font=(UI_FONT,10))
         menu.pack(anchor="w")
-        self.when=tk.Label(right, font=("Segoe UI",9), fg=c["muted"], bg=c["bg"], justify="left", wraplength=380)
+        self.when=tk.Label(right, font=(UI_FONT,9), fg=c["muted"], bg=c["bg"], justify="left", wraplength=380)
         self.when.pack(anchor="w", pady=(4,4))
-        self.lines=scrolledtext.ScrolledText(right, width=44, height=10, wrap="word", font=("Segoe UI",10), bg=c["panel"],
+        self.lines=scrolledtext.ScrolledText(right, width=44, height=10, wrap="word", font=(UI_FONT,10), bg=c["panel"],
                                              fg=c["text"], insertbackground=c["text"], relief="flat", padx=8, pady=6, undo=True)
         self.lines.pack(anchor="w")
         self.lines.bind("<KeyRelease>", lambda e: self.save_messages())
         self.lines.bind("<FocusOut>", lambda e: self.save_messages()) #also catches a right-click paste
         style=tk.Frame(right, bg=c["bg"])
-        tk.Label(style, text="Style for AI", font=("Segoe UI",10), fg=c["text"], bg=c["bg"]).pack(side="left")
-        self.style=tk.Entry(style, width=30, font=("Segoe UI",10), bg=c["panel"], fg=c["text"], insertbackground=c["text"], relief="flat")
+        tk.Label(style, text="Style for AI", font=(UI_FONT,10), fg=c["text"], bg=c["bg"]).pack(side="left")
+        self.style=tk.Entry(style, width=30, font=(UI_FONT,10), bg=c["panel"], fg=c["text"], insertbackground=c["text"], relief="flat")
         self.style.pack(side="left", padx=(10,0), ipady=4)
         style.pack(anchor="w", pady=(10,0))
-        tk.Label(right, text="Optional, like funny, formal, pirate or short.", font=("Segoe UI",9), fg=c["muted"], bg=c["bg"]).pack(anchor="w")
+        tk.Label(right, text="Optional, like funny, formal, pirate or short.", font=(UI_FONT,9), fg=c["muted"], bg=c["bg"]).pack(anchor="w")
         buttons=tk.Frame(right, bg=c["bg"])
         self.generate=self.gui.make_button(buttons, "Generate with AI", self.generate_messages, c["accent"])
         self.generate.pack(side="left")
         self.gui.make_button(buttons, "Hear one", lambda: self.gui.run_task(briefing_say, random_message(self.current_kind()))).pack(side="left", padx=6)
         self.gui.make_button(buttons, "Reset these", self.reset_messages).pack(side="left")
         buttons.pack(anchor="w", pady=(8,0))
-        self.message_status=tk.Label(right, font=("Segoe UI",9), fg=c["muted"], bg=c["bg"], justify="left", wraplength=380)
+        self.message_status=tk.Label(right, font=(UI_FONT,9), fg=c["muted"], bg=c["bg"], justify="left", wraplength=380)
         self.message_status.pack(anchor="w", pady=(6,0))
         self.show_messages()
 
@@ -6408,13 +6466,13 @@ class SettingsWindow:
 
     def section(self, title):
         c=NaviGUI.COLORS
-        tk.Label(self.body, text=title, font=("Segoe UI",12,"bold"), fg=c["navi"], bg=c["bg"]).grid(
+        tk.Label(self.body, text=title, font=(UI_FONT,12,"bold"), fg=c["navi"], bg=c["bg"]).grid(
             row=self.row, column=0, columnspan=2, sticky="w", pady=(14 if self.row else 0, 4))
         self.row+=1
 
     def place(self, label, widget):
         c=NaviGUI.COLORS
-        tk.Label(self.body, text=label, font=("Segoe UI",10), fg=c["text"], bg=c["bg"]).grid(row=self.row, column=0, sticky="w", padx=(0,12))
+        tk.Label(self.body, text=label, font=(UI_FONT,10), fg=c["text"], bg=c["bg"]).grid(row=self.row, column=0, sticky="w", padx=(0,12))
         widget.grid(row=self.row, column=1, sticky="w", pady=2)
         self.row+=1
 
@@ -6422,7 +6480,7 @@ class SettingsWindow:
         #a tk scale's knob is its background color, so with no border or value text only the knob shows that color
         c=NaviGUI.COLORS
         row=tk.Frame(self.body, bg=c["bg"])
-        value=tk.Label(row, width=7, anchor="w", font=("Segoe UI",10), fg=c["text"], bg=c["bg"])
+        value=tk.Label(row, width=7, anchor="w", font=(UI_FONT,10), fg=c["text"], bg=c["bg"])
         unit={"speed": "%", "pitch": " Hz", "volume": "%"}[key]
         def moved(v):
             v=int(float(v))
@@ -6442,7 +6500,7 @@ class SettingsWindow:
         c=NaviGUI.COLORS
         var=var or tk.BooleanVar(value=settings[key])
         tk.Checkbutton(self.body, text=label, variable=var, command=command or (lambda: self.set(key, var.get())),
-                       font=("Segoe UI",10), fg=c["text"], bg=c["bg"], selectcolor=c["panel"], activebackground=c["bg"],
+                       font=(UI_FONT,10), fg=c["text"], bg=c["bg"], selectcolor=c["panel"], activebackground=c["bg"],
                        activeforeground=c["text"], highlightthickness=0, bd=0, cursor="hand2").grid(
                        row=self.row, column=0, columnspan=2, sticky="w", pady=1)
         self.row+=1

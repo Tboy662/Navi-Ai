@@ -25,3 +25,4 @@ minecraft_mod/
 # Generated audio
 *.wav
 *.mp3
+!sounds/*.wav
