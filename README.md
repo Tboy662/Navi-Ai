@@ -85,6 +85,10 @@ The `test` variable at the top of `voice.py` picks how Navi runs:
 - `2`: voice only, in the terminal.
 - `1`: echo test. Records one phrase and reads it back, handy for checking your mic and speakers.
 
+### Sounds
+
+In the GUI, Navi plays two quiet cues: a soft chime when it switches mode (asleep, awake, or one of the AI modes) and a short blip when it starts thinking. They play in the background through `winsound` on Windows and `afplay` on Mac, so nothing extra needs installing. The files live in `sounds/`, `tools/make_sounds.py` regenerates them, and setting `SOUNDS_ENABLED = False` in `sounds.py` mutes them.
+
 ## Troubleshooting
 
 - **`pip install` fails on PyAudioWPatch (Windows):** make sure you have 64-bit Python 3.10+. Upgrade pip with `python -m pip install --upgrade pip` and try again.
