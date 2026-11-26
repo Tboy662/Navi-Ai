@@ -830,7 +830,7 @@ def spell(t):
 #what can you do
 HELP=("I can do a lot. Say my name, then for example: weather, check my mail, draft an email, brief me, my homework, "
       "my grades, remind me at 5 to call mom, set a timer, add milk to my shopping list, what's on my calendar, find "
-      "a pizza place near me, open Spotify, volume up, next song, take a screenshot, lock my computer. New ones: what time "
+      "a pizza place near me, play some music, what's playing, open Spotify, volume up, next song, take a screenshot, lock my computer. New ones: what time "
       "is it, what's 15 times 23, convert 5 miles to kilometers, flip a coin, roll a dice, start a stopwatch, start a focus "
       "timer, take a note, read my notes, how do you say thank you in Spanish, search YouTube for cat videos, how's my battery, "
       "read my clipboard, close Chrome, brightness 50, restart my computer, and repeat that. There's also AI mode, study "

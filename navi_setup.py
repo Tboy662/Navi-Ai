@@ -71,6 +71,15 @@ def _app_password(v):
         "Gmail app passwords are 16 letters (like abcd efgh ijkl mnop). Your normal Gmail password won't work."
 
 
+def _spotify_id(v):
+    v = v.strip()
+    return "" if not v or (len(v) == 32 and all(c in "0123456789abcdefABCDEF" for c in v)) else \
+        "A Spotify client ID is 32 letters and numbers. Copy it from your app's page in the Spotify dashboard."
+
+
+SPOTIFY_REDIRECT = "http://127.0.0.1:43019/callback"  # the same as music.REDIRECT_URI
+
+
 def _canvas_url(v):
     return "" if not v or ("." in v and " " not in v) else "Type your school's Canvas address, like yourschool.instructure.com."
 
@@ -125,6 +134,15 @@ PAGES = [
      "links": [("Accept the model's conditions", "https://huggingface.co/kyutai/pocket-tts"),
                ("Make a token", "https://huggingface.co/settings/tokens")],
      "fields": [("HF_TOKEN", "Hugging Face token", True, _prefix("hf_", name="Hugging Face token"))]},
+    {"title": "Music (Spotify)", "optional": True,
+     "about": "Lets Navi play, pause and skip songs and show what's playing next to the orb, on any of your Spotify "
+              "devices, without the Spotify app open on this PC. Controlling playback needs Spotify Premium. "
+              "This is a client ID, not a password: you sign in to Spotify in your browser afterwards.",
+     "steps": ["Open the Spotify developer dashboard, sign in and press Create app.",
+               "Name it Navi, tick Web API, and under Redirect URIs add exactly: " + SPOTIFY_REDIRECT,
+               "Save, copy the app's Client ID and paste it below. Then say \"connect Spotify\" to Navi."],
+     "links": [("Open the Spotify dashboard", "https://developer.spotify.com/dashboard")],
+     "fields": [("SPOTIFY_CLIENT_ID", "Spotify client ID", False, _spotify_id)]},
     {"title": "Calendar (Google)", "optional": True,
      "about": "Lets Navi read and add events in Google Calendar. This one is a file instead of a key, and it takes a "
               "few minutes in Google Cloud. You can also skip it and drop the file in Navi's folder later.",
@@ -136,7 +154,8 @@ PAGES = [
      "file": "google_credentials.json"},
 ]
 ENV_ORDER = ["GROQ_API_KEY", "GEMINI_API_KEY", "OPENROUTER_API_KEY", "MAIL_USER", "MAIL_PASSWORD", "IMAP_SERVER",
-             "IMAP_PORT", "CANVAS_URL", "CANVAS_API_KEY", "GEOAPIFY_API_KEY", "HF_TOKEN"]
+             "IMAP_PORT", "CANVAS_URL", "CANVAS_API_KEY", "GEOAPIFY_API_KEY", "HF_TOKEN",
+             "SPOTIFY_CLIENT_ID"]
 ENV_DEFAULTS = {"IMAP_SERVER": "imap.gmail.com", "IMAP_PORT": "993"}
 
 

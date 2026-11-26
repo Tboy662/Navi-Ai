@@ -16,6 +16,7 @@ navi_notes.json
 navi_lists.json
 navi_reminders.json
 google_token.json
+spotify_token.json
 google_credentials.json
 client_secret*.json
 *.tmp
