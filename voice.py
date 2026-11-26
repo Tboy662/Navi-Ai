@@ -29,6 +29,7 @@ import ctypes
 from ctypes import wintypes
 import python_weather
 import threading
+import sounds #soft thinking / mode switch cues
 from imap_tools import MailBox
 import email
 from email.header import decode_header
@@ -604,6 +605,14 @@ class NaviGUI:
         else:
             state="active" if self.awake else "inactive"
         self.orb.set_state(state)
+        #soft cues: a chime when the mode changes (asleep / awake / ai modes), a blip when it starts thinking
+        mode="ai" if self.ai else "awake" if self.awake else "asleep"
+        if mode!=getattr(self, "last_mode", "asleep"):
+            sounds.play("mode")
+        elif busy and not getattr(self, "was_busy", False):
+            sounds.play("thinking")
+        self.last_mode=mode
+        self.was_busy=busy
 
     def start_listening(self):
         if self.worker is None and not stop_event.is_set():
