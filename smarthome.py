@@ -1,4 +1,5 @@
-#smart home for navi: lights, plugs, fans and scenes through Home Assistant and/or a Philips Hue bridge.
+#smart home for navi: lights, plugs, fans and scenes on TP-Link Kasa and Tapo devices (found on the wifi, no hub),
+#Home Assistant and/or a Philips Hue bridge.
 #
 #  "turn on the kitchen light", "lights off", "turn off all the lights", "dim the bedroom to 30 percent",
 #  "make the living room blue", "warm white", "turn on the fan plug", "activate the movie scene",
@@ -14,7 +15,9 @@
 #    on your home network, so the token can't cross the internet unencrypted. The Hue bridge must be a home network
 #    address too (Hue's key travels in the address, so it must never leave your network)
 #  - every request has a short timeout, and an unreachable hub is remembered for a minute so other commands stay fast
+import asyncio
 import colorsys
+import concurrent.futures
 import ipaddress
 import os
 import re
@@ -26,6 +29,10 @@ try:
     import requests
 except ImportError: #tests can run without it
     requests=None
+try:
+    import kasa #tp-link kasa and tapo (pip install python-kasa)
+except ImportError:
+    kasa=None
 
 TIMEOUT=5
 CACHE_SECONDS=30
@@ -161,7 +168,7 @@ class HomeAssistant:
             modes=attrs.get("supported_color_modes") or []
             out.append(Device(self, entity, name, HA_DOMAINS[domain], on=(state=="on") if state in ("on", "off") else None,
                               brightness=round(bri/255*100) if isinstance(bri, (int, float)) and state=="on" else None,
-                              color=any(m in ("hs", "xy", "rgb", "rgbw", "rgbww") for m in modes if isinstance(m, str)),
+                              color=any(m in ("hs", "xy", "rgb", "rgbw", "rgbww", "color_temp") for m in modes if isinstance(m, str)),
                               available=state not in ("unavailable", "unknown")))
         return out
 
@@ -223,7 +230,7 @@ class Hue:
             bri=st.get("bri")
             out.append(Device(self, f"light/{id}", str(l.get("name", f"light {id}")), "light", on=bool(st.get("on")),
                               brightness=round(bri/254*100) if isinstance(bri, (int, float)) and st.get("on") else None,
-                              color="xy" in st, available=st.get("reachable", True) is not False))
+                              color="xy" in st or "ct" in st, available=st.get("reachable", True) is not False))
         groups=self.request("GET", "/groups") or {}
         for id, g in (groups.items() if isinstance(groups, dict) else []):
             if not isinstance(g, dict) or g.get("type") not in ("Room", "Zone", "LightGroup"):
@@ -233,7 +240,7 @@ class Hue:
             bri=act.get("bri")
             out.append(Device(self, f"group/{id}", str(g.get("name", f"room {id}")), "room", on=bool(st.get("any_on")),
                               brightness=round(bri/254*100) if isinstance(bri, (int, float)) and st.get("any_on") else None,
-                              color="xy" in act))
+                              color="xy" in act or "ct" in act))
         scenes=self.request("GET", "/scenes") or {}
         seen=set()
         for id, s in (scenes.items() if isinstance(scenes, dict) else []):
@@ -277,9 +284,145 @@ class Hue:
         cfg=self.request("GET", "/config")
         return f"Connected to the Hue bridge {cfg.get('name', '')}".strip()+"." if isinstance(cfg, dict) else "Connected."
 
+class _Loop:
+    #one asyncio loop on its own thread, so tp-link connections can be reused from any of navi's threads
+    loop=None
+    lock=threading.Lock()
+    @classmethod
+    def run(cls, coro, timeout):
+        with cls.lock:
+            if cls.loop is None:
+                cls.loop=asyncio.new_event_loop()
+                threading.Thread(target=cls.loop.run_forever, daemon=True, name="tplink").start()
+        future=asyncio.run_coroutine_threadsafe(coro, cls.loop)
+        try:
+            return future.result(timeout)
+        except concurrent.futures.TimeoutError:
+            future.cancel()
+            raise HubError("Your TP-Link devices took too long to answer.")
+
+TPLINK_KINDS={"bulb": "light", "lightstrip": "light", "dimmer": "light", "wallswitch": "light", "plug": "plug",
+              "stripsocket": "plug", "strip": "plug", "fan": "fan"} #cameras, hubs, sensors, thermostats... are left out
+TPLINK_REDISCOVER=600
+
+class TPLink:
+    #kasa and tapo devices, found on the wifi with tp-link's own local protocol (python-kasa). Kasa needs no login;
+    #tapo devices need the tp-link account from the tapo app, which python-kasa only uses on this network
+    label="TP-Link"
+    short="tp"
+    found={} #ip -> python-kasa device, kept between commands
+    found_at=0
+    found_login=None
+    def __init__(self, user="", password=""):
+        self.user, self.password=user or "", password or ""
+        self.notes=[]
+
+    def login(self):
+        return kasa.Credentials(self.user, self.password) if self.user and self.password else None
+
+    async def discover(self):
+        cls=TPLink
+        for d in list(cls.found.values()):
+            try:
+                await d.disconnect()
+            except Exception:
+                pass
+        found=await kasa.Discover.discover(discovery_timeout=3, credentials=self.login())
+        cls.found={ip: d for ip, d in found.items() if private_host(ip)} #only devices on this network
+        cls.found_at=time.time()
+        cls.found_login=(self.user, self.password)
+
+    async def load(self):
+        cls=TPLink
+        if time.time()-cls.found_at>TPLINK_REDISCOVER or cls.found_login!=(self.user, self.password):
+            await self.discover()
+        items=list(cls.found.items())
+        results=await asyncio.gather(*(d.update() for ip, d in items), return_exceptions=True)
+        out, locked, lost=[], 0, False
+        for (ip, d), r in zip(items, results):
+            if isinstance(r, kasa.AuthenticationError):
+                locked+=1
+                continue
+            if isinstance(r, Exception):
+                lost=True #moved to another address or unplugged: look again next time
+                continue
+            if d.children:
+                for child in d.children:
+                    out.append(self.device(f"{ip}/{child.device_id}", child))
+            else:
+                out.append(self.device(ip, d))
+        if lost:
+            cls.found_at=0
+        self.notes=[f"{locked} TP-Link Tapo device{'s need' if locked>1 else ' needs'} your TP-Link account on the "
+                    "Keys page before I can control "+("them." if locked>1 else "it.")] if locked else []
+        return [d for d in out if d]
+
+    def device(self, id, d):
+        kind=TPLINK_KINDS.get(getattr(d.device_type, "value", ""))
+        if not kind:
+            return None
+        name=str(d.alias or d.model or id)
+        if kind=="light" and re.search(r"(?i)\bfan\b", name):
+            kind="fan"
+        light=d.modules.get(kasa.Module.Light) if kind=="light" else None
+        dims=bool(light and light.has_feature("brightness"))
+        return Device(self, id, name, kind, on=bool(d.is_on), color=bool(light and (light.has_feature("hsv") or light.has_feature("color_temp"))),
+                      brightness=light.brightness if dims and d.is_on else None)
+
+    def devices(self):
+        if kasa is None:
+            return []
+        return _Loop.run(self.load(), 25)
+
+    def find(self, id):
+        ip, _, child=id.partition("/")
+        d=TPLink.found.get(ip)
+        if d is None:
+            raise HubError("That TP-Link device moved. Try again in a moment.")
+        if child:
+            d=next((c for c in d.children if c.device_id==child), None)
+            if d is None:
+                raise HubError("That TP-Link socket is gone.")
+        return d
+
+    async def change(self, id, change):
+        d=self.find(id)
+        if TPLINK_KINDS.get(getattr(d.device_type, "value", "")) is None:
+            raise HubError("I can't control that.")
+        if change.get("on") is False:
+            await d.turn_off()
+            return
+        light=d.modules.get(kasa.Module.Light)
+        if light and "brightness" in change and light.has_feature("brightness"):
+            await light.set_brightness(max(1, min(100, change["brightness"])))
+        if light and "step" in change and light.has_feature("brightness"):
+            await light.set_brightness(max(1, min(100, (light.brightness or 50)+change["step"])))
+        if light and "rgb" in change and light.has_feature("hsv"):
+            h, s, v=colorsys.rgb_to_hsv(*(c/255 for c in change["rgb"]))
+            await light.set_hsv(round(h*360)%360, round(s*100), max(1, light.brightness or 100))
+        if light and "kelvin" in change and light.has_feature("color_temp"):
+            await light.set_color_temp(change["kelvin"])
+        if not d.is_on:
+            await d.turn_on()
+
+    def apply(self, device, change):
+        try:
+            _Loop.run(self.change(device.id, change), 15)
+        except HubError:
+            raise
+        except Exception as e:
+            TPLink.found_at=0
+            raise HubError(f"I couldn't reach {device.name} ({type(e).__name__}).")
+
+    def check(self):
+        devices=self.devices()
+        return " ".join([f"Found {len(devices)} TP-Link device{'' if len(devices)==1 else 's'}."]+self.notes)
+
 def hubs(env):
     #the hubs set up in .env. A hub with a bad address is left out and its problem reported
     out, problems=[], []
+    if kasa is not None and env.get("TPLINK_OFF")!="1": #tp-link needs no setup: devices on the wifi are found
+        out.append(TPLink(env.get("TPLINK_USER", ""), env.get("TPLINK_PASSWORD", "")))
     if env.get("HA_URL") and env.get("HA_TOKEN"):
         try:
             out.append(HomeAssistant(env["HA_URL"], env["HA_TOKEN"]))
@@ -321,7 +464,7 @@ def hue_pair(bridge, http=None):
     raise HubError("The bridge didn't pair: "+str(item.get("error", {}).get("description", "unknown answer"))[:100])
 
 #the device list, cached so a run of commands doesn't ask the hub every time
-_cache={"at": 0, "devices": [], "key": None, "down": {}}
+_cache={"at": 0, "devices": [], "key": None, "down": {}, "notes": []}
 _lock=threading.Lock()
 
 def all_devices(ctx, fresh=False):
@@ -330,8 +473,8 @@ def all_devices(ctx, fresh=False):
     hidden=set(ctx.hidden() or [])
     with _lock:
         if not fresh and _cache["key"]==key and time.time()-_cache["at"]<CACHE_SECONDS:
-            return [d for d in _cache["devices"] if d.key not in hidden], problems
-    devices=[]
+            return [d for d in _cache["devices"] if d.key not in hidden], problems+_cache["notes"]
+    devices, notes=[], []
     for hub in found:
         down=_cache["down"].get(hub.short)
         if down and time.time()-down[0]<DOWN_SECONDS and not fresh:
@@ -339,13 +482,14 @@ def all_devices(ctx, fresh=False):
             continue
         try:
             devices+=hub.devices()
+            notes+=getattr(hub, "notes", [])
             _cache["down"].pop(hub.short, None)
         except HubError as e:
             _cache["down"][hub.short]=(time.time(), str(e))
             problems.append(str(e))
     with _lock:
-        _cache.update(at=time.time(), devices=devices, key=key)
-    return [d for d in devices if d.key not in hidden], problems
+        _cache.update(at=time.time(), devices=devices, key=key, notes=notes)
+    return [d for d in devices if d.key not in hidden], problems+notes
 
 def forget_cache():
     with _lock:
@@ -370,7 +514,8 @@ NUMBER_WORDS={"ten": 10, "twenty": 20, "thirty": 30, "forty": 40, "fifty": 50, "
               "max": 100, "maximum": 100, "minimum": 1, "lowest": 1, "min": 1}
 
 def words_of(s):
-    return [w[:-1] if len(w)>3 and w.endswith("s") and not w.endswith("ss") else w for w in re.findall(r"[a-z0-9']+", s.lower())]
+    s=re.sub(r"['’`]s\b", "", s.lower().replace("’", "'")) #"Tomer’s light" and "tomer's light" are the same words
+    return [w[:-1] if len(w)>3 and w.endswith("s") and not w.endswith("ss") else w for w in re.findall(r"[a-z0-9]+", s)]
 
 def delay_of(t):
     m=re.search(r"\b(?:in|after)\s+(\d{1,4}|an?|one|two|three|five|ten|fifteen|twenty|thirty|half an?)\s*(seconds?|secs?|minutes?|mins?|hours?|hrs?)\b", t)
@@ -577,7 +722,7 @@ def names_text(devices, limit=6):
 def the(devices):
     if len(devices)==1:
         name=devices[0].name
-        return name if re.match(r"(?i)the\b|my\b", name) else "the "+name
+        return name if re.match(r"(?i)the\b|my\b", name) or re.search(r"['’]s\b", name) else "the "+name
     return names_text(devices)
 
 #doing it
@@ -638,13 +783,19 @@ def run(text, ctx):
     found, _=hubs(ctx.env)
     if not found:
         if explicit and req["action"]!="scene":
-            ctx.say("Smart home isn't set up yet. Add Home Assistant or a Philips Hue bridge in Settings, Smart home.")
+            ctx.say("Smart home isn't set up yet. Add TP-Link, Home Assistant or a Philips Hue bridge in Settings, Smart home.")
             return True
         return False
     if req["action"]=="error":
         ctx.say(req["say"])
         return True
     devices, problems=all_devices(ctx)
+    if not devices and req["action"]!="list":
+        if explicit:
+            ctx.say(problems[0] if problems else "I didn't find any smart lights or plugs on your network. You can set "
+                    "them up in Settings, Smart home.")
+            return True
+        return False
     if req["action"]=="list":
         if not devices:
             ctx.say(problems[0] if problems else "I don't see any lights, plugs, fans or scenes.")
@@ -689,13 +840,15 @@ def run(text, ctx):
     hits=match(req["target"], devices, kinds)
     if "step" in req["change"] or "brightness" in req["change"]:
         hits=[d for d in hits if d.kind in ("light", "room")] or hits
+    if set(kinds)=={"light", "room"}:
+        hits=[d for d in hits if d.color]
     if not hits:
         others=match(req["target"], [d for d in devices if d.kind!="scene"])
         if others and set(kinds)=={"light", "room"}:
             ctx.say(f"{cap(the(others))} can't change color.")
             return True
         if explicit:
-            ctx.say(problems[0] if problems and not devices else f"I couldn't find {req['target']} in your smart home.")
+            ctx.say(f"I couldn't find {req['target']} in your smart home."+(" "+problems[-1] if problems else ""))
             return True
         return False
     hits=[d for d in hits if d.available] or hits

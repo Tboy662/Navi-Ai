@@ -140,6 +140,14 @@ PAGES = [
      "steps": ["Sign up at Geoapify and create a project.", "Copy the project's API key and paste it below."],
      "links": [("Get a Geoapify key", "https://myprojects.geoapify.com/")],
      "fields": [("GEOAPIFY_API_KEY", "Geoapify API key", True, None)]},
+    {"title": "Smart home (TP-Link Tapo)", "optional": True,
+     "about": "TP-Link Kasa lights and plugs work with no setup: Navi finds them on your Wi-Fi. Tapo devices also need "
+              "the TP-Link account you use in the Tapo app. Navi only uses it on your home network to unlock them.",
+     "steps": ["Type the email you sign in to the Tapo app with.", "Type that account's password.",
+               "Skip this page if you only have Kasa devices, or none."],
+     "links": [("TP-Link account", "https://www.tapo.com/")],
+     "fields": [("TPLINK_USER", "TP-Link email", False, _gmail),
+                ("TPLINK_PASSWORD", "TP-Link password", True, None)]},
     {"title": "Smart home (Home Assistant)", "optional": True,
      "about": "Lets Navi turn your lights, plugs and fans on and off. Skip it if you don't use Home Assistant. "
               "Philips Hue works without it: pair the bridge later in Settings > Smart home.",
@@ -186,7 +194,7 @@ PAGES = [
      "file": "google_credentials.json"},
 ]
 ENV_ORDER = ["GROQ_API_KEY", "GEMINI_API_KEY", "OPENROUTER_API_KEY", "MAIL_USER", "MAIL_PASSWORD", "IMAP_SERVER",
-             "IMAP_PORT", "CANVAS_URL", "CANVAS_API_KEY", "GEOAPIFY_API_KEY", "HA_URL", "HA_TOKEN", "HUE_BRIDGE", "HUE_KEY", "HF_TOKEN",
+             "IMAP_PORT", "CANVAS_URL", "CANVAS_API_KEY", "GEOAPIFY_API_KEY", "TPLINK_USER", "TPLINK_PASSWORD", "HA_URL", "HA_TOKEN", "HUE_BRIDGE", "HUE_KEY", "HF_TOKEN",
              "SPOTIFY_CLIENT_ID", "DISCORD_BOT_TOKEN"]
 ENV_DEFAULTS = {"IMAP_SERVER": "imap.gmail.com", "IMAP_PORT": "993"}
 

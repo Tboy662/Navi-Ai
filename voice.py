@@ -7132,8 +7132,13 @@ class SettingsWindow:
                                                                   else "Couldn't send it. Check your internet."))
 
     def smart_home_page(self):
-        #home assistant (address and token on the keys page), hue pairing, and devices navi must leave alone
+        #tp-link (found on the wifi), home assistant (address and token on the keys page), hue pairing, and devices
+        #navi must leave alone
         c=NaviGUI.COLORS
+        self.section("TP-Link Kasa and Tapo")
+        self.label("I find these on your Wi-Fi by myself. Tapo devices also need the TP-Link account from the Tapo app "
+                   "on the Keys page; I only use it on your network to unlock them.", muted=False)
+        self.buttons(("Keys page", lambda: self.show_page("Keys"), False), ("Find devices", self.show_smart_devices, True))
         self.section("Home Assistant")
         self.label("1. In Home Assistant, click your name (bottom left), open Security, and under Long-lived access "
                    "tokens press Create token.\n2. Put your Home Assistant address (like http://homeassistant.local:8123) "
@@ -7155,7 +7160,7 @@ class SettingsWindow:
         self.section("Devices")
         self.label("Lights, plugs, fans and scenes I can control. Locks, doors, alarms and thermostats are never touched. "
                    "Select any others you want me to leave alone and press Hide.")
-        self.smart_list=tk.Listbox(self.body, width=58, height=8, font=(UI_FONT,10), bg=c["panel"], fg=c["text"],
+        self.smart_list=tk.Listbox(self.body, width=58, height=6, font=(UI_FONT,10), bg=c["panel"], fg=c["text"],
                                    selectbackground=c["accent"], relief="flat", highlightthickness=0, activestyle="none",
                                    selectmode="extended")
         self.smart_list.grid(row=self.row, column=0, columnspan=2, sticky="w", pady=(4,4))

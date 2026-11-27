@@ -89,7 +89,7 @@ def build_navi(icon):
             "--contents-directory", ".", "--icon", icon, "--noconfirm", "--clean",
             "--distpath", os.path.join(BUILD, "app"), "--workpath", os.path.join(BUILD, "work"), "--specpath", BUILD,
             "--hidden-import", "navi_setup", "--collect-binaries", "vosk", "--collect-data", "gtts",
-            "--collect-data", "speech_recognition", "--collect-data", "playwright", "--collect-submodules", "edge_tts", "--collect-submodules", "pywinauto"]
+            "--collect-data", "speech_recognition", "--collect-data", "playwright", "--collect-submodules", "edge_tts", "--collect-submodules", "pywinauto", "--collect-submodules", "kasa"]
     for name in DATA:
         src = os.path.join(ROOT, name)
         if not os.path.exists(src):

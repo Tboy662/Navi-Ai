@@ -117,7 +117,7 @@ It can also run when Navi starts and when the PC wakes from sleep (Settings > Da
 
 ## Smart home (New)
 
-Set it up in Settings > Smart home: Home Assistant (address and token on the Keys page) and/or a Philips Hue bridge (Find bridge, then Pair and press the button on the bridge).
+TP-Link Kasa lights, switches and plugs on your Wi-Fi work with no setup. Tapo devices also need your TP-Link account (the Tapo app's email and password) on the Keys page. Home Assistant (address and token on the Keys page) and Philips Hue (Settings > Smart home: Find bridge, then Pair and press the button on the bridge) work too.
 
 | Say | What happens |
 | --- | --- |
@@ -245,7 +245,7 @@ When the same channel name is in two servers, Navi asks which one ("the first on
 - **Listening**: offline wake word, saying "stop" to interrupt, only wake for my voice.
 - **Keys**: every API key, including the Discord bot token, saved to `.env` and used straight away.
 - **Location**: your city or exact address, Celsius or Fahrenheit, and food filters.
-- **Smart home**: test Home Assistant, find and pair a Hue bridge, see your devices and hide any Navi should leave alone.
+- **Smart home**: find TP-Link devices, test Home Assistant, find and pair a Hue bridge, see your devices and hide any Navi should leave alone.
 - **Phone app**: use Navi from your phone (see below).
 - **Phone alerts**: reminders and briefings on your phone through the free ntfy app (always, only when you're away, or never). **New:** a Texts section to hear when a new text comes in, and to have it read out.
 - **Calendar**: connect or disconnect Google Calendar.
@@ -282,6 +282,6 @@ These are the rules the features follow, and what was tested before this update 
 - **Private files stay out of git**: `.env`, settings, memory, notes, Discord read history (`navi_discord.json`), lists, reminders and Google sign-in files (`google_token.json`, `client_secret*.json`) are all in `.gitignore`.
 - **Spotify** sign-in happens on Spotify's own page with PKCE, so Navi never sees your password and has no client secret to leak. The answer comes back to a small server on `127.0.0.1` only (not reachable from your network), on one path, once, and only with the random code Navi made for that sign-in; tested with forged and malformed callbacks, which are refused. The token is kept in `spotify_token.json` (in `.gitignore`, never put in the installer, never printed). Navi only talks to `accounts.spotify.com` and `api.spotify.com`, what you say only goes into a search query, song ids from Spotify are checked before use, and album art only comes over https from Spotify's image servers (no redirects, 2 MB at most). Tests: `tests/test_music_commands.py` and `tests/test_music_spotify.py` (about 130 checks with a fake Spotify).
 
-- **Smart home** only ever touches lights, switches and plugs, fans and scenes. Locks, doors, garage doors, alarms, cameras and thermostats are skipped even when Home Assistant has them, and so is any device you hide in Settings > Smart home. What you say is only matched against the names your hub reports, so it never becomes an address, an entity id or a service: the only calls are turn on and turn off. "Turn off the front door" does nothing, and a name that isn't a device never falls back to every light. The Home Assistant token is only sent to your Home Assistant, and only over https unless that address is on your home network; the Hue bridge has to be a home network address too. Each request times out after 5 seconds, and a hub that doesn't answer is skipped for a minute so other commands stay fast. Tested with about 50 checks against fake hubs, including locks, garage doors, hidden devices, public and tricky addresses, a wrong token and a hub that's down.
+- **Smart home** only ever touches lights, switches and plugs, fans and scenes. TP-Link devices are found on your own network only, and TP-Link cameras, hubs, sensors and thermostats are skipped. The TP-Link account is only used by python-kasa to unlock Tapo devices on your network. Locks, doors, garage doors, alarms, cameras and thermostats are skipped even when Home Assistant has them, and so is any device you hide in Settings > Smart home. What you say is only matched against the names your hub reports, so it never becomes an address, an entity id or a service: the only calls are turn on and turn off. "Turn off the front door" does nothing, and a name that isn't a device never falls back to every light. The Home Assistant token is only sent to your Home Assistant, and only over https unless that address is on your home network; the Hue bridge has to be a home network address too. Each request times out after 5 seconds, and a hub that doesn't answer is skipped for a minute so other commands stay fast. Tested with about 50 checks against fake hubs, including locks, garage doors, hidden devices, public and tricky addresses, a wrong token and a hub that's down.
 
 Tests for the new commands (about 80 checks, including the attacks above) were run against `extras.py` before committing.

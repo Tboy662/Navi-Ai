@@ -16,5 +16,6 @@ python-weather>=2.0       # "weather" command
 imap-tools>=1.5           # "mail" command
 python-dotenv>=1.0      # loads keys from .env
 requests>=2.31            # Canvas homework and restaurant lookups
+python-kasa>=0.10         # TP-Link Kasa and Tapo lights and plugs (smart home)
 pywinauto>=0.6.8; sys_platform == "win32"   # sends phone texts through the Phone Link app
 qrcode>=7.4               # the QR code for pairing the phone app (optional: the code can be typed instead)
