@@ -182,6 +182,28 @@ While music plays, the orb grows a bar to its left with the song, the album art,
 
 Sentences start with a capital letter and spaces go in the right places. Words like "period" and "comma" always become punctuation while dictating. Works on Windows and macOS (on a Mac, allow Navi, or the Terminal you start it from, under System Settings > Privacy & Security > Accessibility the first time).
 
+## Discord (New)
+
+| Say | What happens |
+| --- | --- |
+| "read the general channel on Discord", "read memes in my gaming server on Discord", "read Discord" | Reads the last 5 messages in that channel, oldest first, and shows them in the window. "Read Discord" reads the channel you read last. |
+| "anything new on Discord", "what's new in general on Discord", "catch me up on Discord" | Only the messages since Navi last read that channel. |
+| "tell general on Discord that I'm on my way", "send good game to memes on Discord", "send a Discord message to homework help" | Sends a message to a channel. Navi reads it back and only sends it after you say yes. If you didn't say the message, Navi asks for it. |
+| "message Henrik on Discord saying want to play later", "DM Alex on Discord" | Sends a direct message to someone in one of your servers, after you say yes. |
+| "join the Lobby voice channel", "hop into study room vc on Discord", "join voice on Discord" | Opens that voice channel in your Discord app so you join it as yourself. If Discord shows a Join Voice button, press it. |
+| "set up Discord" | Opens the page that adds your bot to a server. |
+
+Reading and sending go through a Discord bot that you make, once:
+
+1. In Settings > Keys, press **Get** next to Discord bot token. It opens the Discord developer portal. Press New Application and name it Navi.
+2. On the Bot page press Reset Token and copy it. On the same page turn on **Message Content Intent** (so the bot can read messages) and **Server Members Intent** (so it can find people to DM).
+3. Paste the token in Settings > Keys and press Save keys.
+4. Say "Navi, set up Discord" and pick your server on the page that opens.
+
+ Messages you send show up as sent by your bot, not by you. That's on purpose: Discord bans apps that sign in as you, so Navi never does. For the same reason Navi can't read your own DMs, only server channels the bot can see. Joining voice needs no bot, just the Discord app.
+
+When the same channel name is in two servers, Navi asks which one ("the first one", "the second one", or the server's name).
+
 ## AI modes
 
 | Say | What happens |
@@ -206,6 +228,7 @@ Sentences start with a capital letter and spaces go in the right places. Words l
 - **Homework alerts**: on or off, the time of the daily heads-up, how many hours it looks ahead, how long before each due time the second warning comes (0 = off), and Check now.
 - **Startup**: start with Windows.
 - **Listening**: offline wake word, saying "stop" to interrupt, only wake for my voice.
+- **Keys**: every API key, including the Discord bot token, saved to `.env` and used straight away.
 - **Location**: your city or exact address, Celsius or Fahrenheit, and food filters.
 - **Smart home**: test Home Assistant, find and pair a Hue bridge, see your devices and hide any Navi should leave alone.
 - **Phone alerts**: reminders and briefings on your phone through the free ntfy app (always, only when you're away, or never).
@@ -226,7 +249,8 @@ These are the rules the features follow, and what was tested before this update 
 - **Notes** are saved to one fixed file; nothing you say becomes a file path. Notes are capped at 1000 characters and 500 notes, and a damaged notes file is ignored instead of crashing Navi.
 - **Closing apps** only sends the normal close message (like clicking X), skips Navi's own windows and the taskbar and desktop, and refuses vague targets like "close it" or "close everything".
 - **Dictation never types into a terminal** (Command Prompt, PowerShell, Windows Terminal, macOS Terminal, iTerm and others) or the Windows Run box, because "new line" presses Enter and would run what was typed as a command. It also won't type into Navi's own window. "Stop dictation" is checked before anything is typed, so the stop phrase itself never ends up in your text. On a Mac the text goes to System Events as an argument, never pasted into the AppleScript.
-- **Private files stay out of git**: `.env`, settings, memory, notes, lists, reminders and Google sign-in files (`google_token.json`, `client_secret*.json`) are all in `.gitignore`.
+- **Discord** goes only through your own bot and Discord's official API, never your account. Messages are read back and need a yes, and can't ping @everyone, @here, roles or people (Discord is told not to turn any mentions into pings). Channels and people are only picked from what Discord lists, and only their number IDs go into addresses. What people wrote is only read out loud. Messages and channel names given to the AI are marked as data, and what it answers still needs your yes before anything is sent.
+- **Private files stay out of git**: `.env`, settings, memory, notes, Discord read history (`navi_discord.json`), lists, reminders and Google sign-in files (`google_token.json`, `client_secret*.json`) are all in `.gitignore`.
 - **Spotify** sign-in happens on Spotify's own page with PKCE, so Navi never sees your password and has no client secret to leak. The answer comes back to a small server on `127.0.0.1` only (not reachable from your network), on one path, once, and only with the random code Navi made for that sign-in; tested with forged and malformed callbacks, which are refused. The token is kept in `spotify_token.json` (in `.gitignore`, never put in the installer, never printed). Navi only talks to `accounts.spotify.com` and `api.spotify.com`, what you say only goes into a search query, song ids from Spotify are checked before use, and album art only comes over https from Spotify's image servers (no redirects, 2 MB at most). Tests: `tests/test_music_commands.py` and `tests/test_music_spotify.py` (about 130 checks with a fake Spotify).
 
 - **Smart home** only ever touches lights, switches and plugs, fans and scenes. Locks, doors, garage doors, alarms, cameras and thermostats are skipped even when Home Assistant has them, and so is any device you hide in Settings > Smart home. What you say is only matched against the names your hub reports, so it never becomes an address, an entity id or a service: the only calls are turn on and turn off. "Turn off the front door" does nothing, and a name that isn't a device never falls back to every light. The Home Assistant token is only sent to your Home Assistant, and only over https unless that address is on your home network; the Hue bridge has to be a home network address too. Each request times out after 5 seconds, and a hub that doesn't answer is skipped for a minute so other commands stay fast. Tested with about 50 checks against fake hubs, including locks, garage doors, hidden devices, public and tricky addresses, a wrong token and a hub that's down.

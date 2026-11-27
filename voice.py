@@ -59,6 +59,7 @@ import dictation #"start dictation": types what you say into the window you're u
 import extras #time, calculator, conversions, notes, translate, web search, system status, power and more
 import music #spotify: play, pause, skip and what's playing, on any of your spotify devices
 import smarthome #lights, plugs, fans and scenes through home assistant or philips hue
+import discord_control #read and send discord messages through your bot, open voice channels
 from imap_tools import MailBox
 from email.header import decode_header
 import requests
@@ -5875,6 +5876,8 @@ def handle_command(text):
         pass
     elif dictation.start_request(t): #types what you say into the focused window until "stop dictation"
         dictation.run(say=lambda words: text_to_speech(words), listen=hear_dictation, post=gui_post)
+    elif discord_control.handle(text, extras_context): #discord: read a channel, send a message (after a yes), join voice
+        pass
     elif extras.handle(text, extras_context): #time, calculator, conversions, notes, translate, search, system, power...
         pass
     elif re.search(r"\bremember\b|\bforget\b|\bwhat do you know about me\b", t):

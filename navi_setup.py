@@ -89,6 +89,11 @@ def _ha_url(v):
     return "Type the address you open Home Assistant at, like http://homeassistant.local:8123."
 
 
+def _discord_token(v):
+    return "" if not v or (v.count(".") == 2 and " " not in v) else \
+        "That doesn't look like a Discord bot token (three parts with dots between them, from the Bot page)."
+
+
 def _canvas_url(v):
     return "" if not v or ("." in v and " " not in v) else "Type your school's Canvas address, like yourschool.instructure.com."
 
@@ -161,6 +166,15 @@ PAGES = [
                "Save, copy the app's Client ID and paste it below. Then say \"connect Spotify\" to Navi."],
      "links": [("Open the Spotify dashboard", "https://developer.spotify.com/dashboard")],
      "fields": [("SPOTIFY_CLIENT_ID", "Spotify client ID", False, _spotify_id)]},
+    {"title": "Discord (your own bot)", "optional": True,
+     "about": "Lets Navi read Discord channels to you and send messages there or to people, through a bot you make. "
+              "Messages show up as sent by your bot. Navi never signs in as you, which Discord doesn't allow. "
+              "Joining voice channels works without this.",
+     "steps": ["Open the Discord developer portal, press New Application and name it Navi.",
+               "Under Bot, press Reset Token and copy it. Turn on Message Content Intent and Server Members Intent there too.",
+               "Paste the token below. Then say \"Navi, set up Discord\" to add the bot to your server."],
+     "links": [("Discord developer portal", "https://discord.com/developers/applications")],
+     "fields": [("DISCORD_BOT_TOKEN", "Discord bot token", True, _discord_token)]},
     {"title": "Calendar (Google)", "optional": True,
      "about": "Lets Navi read and add events in Google Calendar. This one is a file instead of a key, and it takes a "
               "few minutes in Google Cloud. You can also skip it and drop the file in Navi's folder later.",
@@ -173,7 +187,7 @@ PAGES = [
 ]
 ENV_ORDER = ["GROQ_API_KEY", "GEMINI_API_KEY", "OPENROUTER_API_KEY", "MAIL_USER", "MAIL_PASSWORD", "IMAP_SERVER",
              "IMAP_PORT", "CANVAS_URL", "CANVAS_API_KEY", "GEOAPIFY_API_KEY", "HA_URL", "HA_TOKEN", "HUE_BRIDGE", "HUE_KEY", "HF_TOKEN",
-             "SPOTIFY_CLIENT_ID"]
+             "SPOTIFY_CLIENT_ID", "DISCORD_BOT_TOKEN"]
 ENV_DEFAULTS = {"IMAP_SERVER": "imap.gmail.com", "IMAP_PORT": "993"}
 
 
