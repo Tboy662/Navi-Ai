@@ -21,11 +21,12 @@ BUILD = os.path.join(ROOT, "build")
 DIST = os.path.join(ROOT, "dist")
 SEP = os.pathsep
 # files Navi reads at run time, copied next to Navi.exe. Nothing personal (no .env, settings, memory or recordings)
-DATA = ["sounds", "minecraft_knowledge.md", "minecraft_examples.json", "voice_clone_worker.py", "COMMANDS.md",
+DATA = ["sounds", "phone_app", "minecraft_knowledge.md", "minecraft_examples.json", "voice_clone_worker.py", "COMMANDS.md",
         ".env.example", "vosk_model", "vosk_spk_model"]
 OPTIONAL_DATA = {"vosk_model", "vosk_spk_model"}  # offline wake word models: Navi falls back to Google without them
 EXCLUDE = ["matplotlib", "scipy", "pandas", "torch", "IPython", "pytest", "setuptools"]
-SECRET_FILES = [".env", "navi_settings.json", "navi_memory.json", "google_token.json", "google_credentials.json"]
+SECRET_FILES = [".env", "navi_settings.json", "navi_memory.json", "google_token.json", "google_credentials.json",
+                "navi_phones.json"]
 
 
 def run(args):

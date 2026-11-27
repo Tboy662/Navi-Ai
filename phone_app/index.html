@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+<meta name="theme-color" content="#1e1f26">
+<meta name="color-scheme" content="dark">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Navi">
+<title>Navi</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png" type="image/png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app">
+  <header>
+    <div class="title">
+      <span class="orb" id="orb"></span>
+      <h1 id="name">Navi</h1>
+    </div>
+    <span class="status" id="status">Connecting...</span>
+    <button class="icon-btn" id="menu-btn" aria-label="Options" hidden>
+      <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg>
+    </button>
+  </header>
+
+  <section id="pair" hidden>
+    <div class="pair-card">
+      <span class="orb big"></span>
+      <h2>Pair with Navi</h2>
+      <p>On your PC, open Navi's <b>Settings</b>, then <b>Phone app</b>, and press <b>Pair a phone</b>. Scan the code with your camera, or type the code here.</p>
+      <form id="pair-form" autocomplete="off">
+        <input id="pair-code" inputmode="text" autocapitalize="characters" spellcheck="false" maxlength="9" placeholder="ABCD-EFGH" aria-label="Pairing code">
+        <button type="submit" class="primary">Pair</button>
+      </form>
+      <p class="error" id="pair-error" role="alert"></p>
+    </div>
+  </section>
+
+  <main id="chat" hidden>
+    <div id="log" aria-live="polite"></div>
+    <div id="hint" class="hint" hidden></div>
+  </main>
+
+  <footer id="composer" hidden>
+    <div class="chips" id="chips">
+      <button data-say="weather">Weather</button>
+      <button data-say="brief me">Brief me</button>
+      <button data-say="check my mail">Mail</button>
+      <button data-say="homework">Homework</button>
+      <button data-say="what's on my calendar today">Calendar</button>
+      <button data-say="what are my reminders">Reminders</button>
+    </div>
+    <form id="say-form" autocomplete="off">
+      <button type="button" class="icon-btn mic" id="mic" aria-label="Talk" hidden>
+        <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-2.08A7 7 0 0 0 19 12z"/></svg>
+      </button>
+      <input id="say" enterkeyhint="send" placeholder="Ask Navi..." aria-label="Message">
+      <button type="button" class="icon-btn stop" id="stop" aria-label="Stop" hidden>
+        <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
+      </button>
+      <button type="submit" class="icon-btn send" id="send" aria-label="Send">
+        <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M3 20.5 21 12 3 3.5 3 10l12 2-12 2z"/></svg>
+      </button>
+    </form>
+  </footer>
+
+  <div id="sheet" class="sheet" hidden>
+    <div class="sheet-card">
+      <h2>Options</h2>
+      <label class="row"><span>Read replies out loud</span><input type="checkbox" id="opt-speak"></label>
+      <label class="row"><span>Send right after I stop talking</span><input type="checkbox" id="opt-autosend"></label>
+      <p class="muted" id="device-line"></p>
+      <button id="clear-btn">Clear this chat</button>
+      <button id="unpair-btn" class="danger">Unpair this phone</button>
+      <button id="close-sheet" class="primary">Done</button>
+    </div>
+  </div>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

@@ -103,6 +103,10 @@ On a Mac, the first run asks for **Microphone** access for your terminal app; al
 
 The orb in the bottom-right corner shows what Navi is doing: dark blue when asleep, bright blue when awake, green while thinking, and red/orange in AI mode. On Windows you can click straight through it; on a Mac it sits on top of whatever is in that corner.
 
+### On your phone
+
+Navi has a free phone app for Android and iPhone: turn it on in **Settings > Phone app**, scan the QR code, and add it to your home screen. It works on your home Wi-Fi, and anywhere with the free Tailscale app. See [COMMANDS.md](COMMANDS.md#phone-app-new).
+
 ### Run modes
 
 The `test` variable at the top of `voice.py` picks how Navi runs:

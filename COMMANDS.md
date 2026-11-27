@@ -154,10 +154,23 @@ It can also run when Navi starts and when the PC wakes from sleep (Settings > Da
 - **Startup**: start with Windows.
 - **Listening**: offline wake word, saying "stop" to interrupt, only wake for my voice.
 - **Location**: your city or exact address, Celsius or Fahrenheit, and food filters.
+- **Phone app**: use Navi from your phone (see below).
 - **Phone alerts**: reminders and briefings on your phone through the free ntfy app (always, only when you're away, or never).
 - **Calendar**: connect or disconnect Google Calendar.
 - **Memory**: see, add and forget what Navi remembers.
 - **Messages**: edit Navi's greetings, goodbyes and other lines, or have the AI write new ones in a style you pick.
+
+## Phone app (New)
+
+Talk to Navi on your PC from your phone, by typing or by voice. It's a web app that Navi serves, which you add to your home screen, so it's free and works on Android and iPhone.
+
+1. In Navi, open **Settings > Phone app** and tick **Let my phone use Navi**. On Windows, allow Navi through the firewall on private networks if asked.
+2. Press **Pair a phone** and scan the QR code with your phone's camera (or open the address shown and type the code).
+3. Add it to your home screen: on iPhone, Share then Add to Home Screen; on Android, the menu then Add to Home screen or Install app.
+
+Everything you can say after "Navi" works from the phone, including follow-up questions like "should I send it?": you answer in the app. Replies show up as text and play in Navi's voice on the phone. They aren't said out loud on the PC unless you tick that option. Tap a reply to hear it again.
+
+**Away from home:** install the free [Tailscale](https://tailscale.com/download) on the PC and the phone with the same account, press **Set up Tailscale** in the same settings page, then pair again. That gives Navi a private HTTPS address only your devices can reach, which also turns on the phone app's microphone button (phones only allow the mic on HTTPS). On home Wi-Fi without Tailscale, use the microphone on your phone's keyboard instead.
 
 ## Security notes
 
@@ -170,6 +183,7 @@ These are the rules the features follow, and what was tested before this update 
 - **Web searches** only open fixed `https://` search pages with your words URL-encoded, so a search can't become a `javascript:` or `file:` link or point at another site.
 - **Notes** are saved to one fixed file; nothing you say becomes a file path. Notes are capped at 1000 characters and 500 notes, and a damaged notes file is ignored instead of crashing Navi.
 - **Closing apps** only sends the normal close message (like clicking X), skips Navi's own windows and the taskbar and desktop, and refuses vague targets like "close it" or "close everything".
+- **Phone app.** It's off until you turn it on. A phone has to pair with a one-time code that lasts 10 minutes and closes after 10 wrong tries; pairing gives it a random 256-bit token, and only a hash of that is saved (`navi_phones.json`). Removing a phone in settings cuts it off at once. Only home-network, Tailscale and local addresses are answered, so even a forwarded router port can't reach it from the internet. The server only serves the app's own files from `phone_app/`, and the phone can only send text, the same as talking to Navi. On plain home Wi-Fi the traffic isn't encrypted; Tailscale encrypts it.
 - **Private files stay out of git**: `.env`, settings, memory, notes, lists, reminders and Google sign-in files (`google_token.json`, `client_secret*.json`) are all in `.gitignore`.
 
 Tests for the new commands (about 80 checks, including the attacks above) were run against `extras.py` before committing.
