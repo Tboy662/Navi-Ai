@@ -82,6 +82,13 @@ def _spotify_id(v):
 SPOTIFY_REDIRECT = "http://127.0.0.1:43019/callback"  # the same as music.REDIRECT_URI
 
 
+def _ha_url(v):
+    # a quick look only: Navi checks the address properly (https unless it's on your home network) before using it
+    if not v or (v.startswith(("http://", "https://")) and " " not in v and v.count("/") <= 3):
+        return ""
+    return "Type the address you open Home Assistant at, like http://homeassistant.local:8123."
+
+
 def _canvas_url(v):
     return "" if not v or ("." in v and " " not in v) else "Type your school's Canvas address, like yourschool.instructure.com."
 
@@ -128,6 +135,15 @@ PAGES = [
      "steps": ["Sign up at Geoapify and create a project.", "Copy the project's API key and paste it below."],
      "links": [("Get a Geoapify key", "https://myprojects.geoapify.com/")],
      "fields": [("GEOAPIFY_API_KEY", "Geoapify API key", True, None)]},
+    {"title": "Smart home (Home Assistant)", "optional": True,
+     "about": "Lets Navi turn your lights, plugs and fans on and off. Skip it if you don't use Home Assistant. "
+              "Philips Hue works without it: pair the bridge later in Settings > Smart home.",
+     "steps": ["Type the address you open Home Assistant at (like http://homeassistant.local:8123).",
+               "In Home Assistant click your name, open Security, and under Long-lived access tokens press Create token.",
+               "Name it Navi and paste the token below."],
+     "links": [("How to make a token", "https://www.home-assistant.io/docs/authentication/#your-account-profile")],
+     "fields": [("HA_URL", "Home Assistant address", False, _ha_url),
+                ("HA_TOKEN", "Access token", True, None)]},
     {"title": "Your own voice (Hugging Face)", "optional": True,
      "about": "Only needed if you want Navi to speak in a voice you train in Settings > Voice training. Its voice "
               "model is free but needs a Hugging Face account.",
@@ -156,7 +172,7 @@ PAGES = [
      "file": "google_credentials.json"},
 ]
 ENV_ORDER = ["GROQ_API_KEY", "GEMINI_API_KEY", "OPENROUTER_API_KEY", "MAIL_USER", "MAIL_PASSWORD", "IMAP_SERVER",
-             "IMAP_PORT", "CANVAS_URL", "CANVAS_API_KEY", "GEOAPIFY_API_KEY", "HF_TOKEN",
+             "IMAP_PORT", "CANVAS_URL", "CANVAS_API_KEY", "GEOAPIFY_API_KEY", "HA_URL", "HA_TOKEN", "HUE_BRIDGE", "HUE_KEY", "HF_TOKEN",
              "SPOTIFY_CLIENT_ID"]
 ENV_DEFAULTS = {"IMAP_SERVER": "imap.gmail.com", "IMAP_PORT": "993"}
 

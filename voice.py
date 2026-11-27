@@ -57,6 +57,7 @@ import threading
 import sounds #soft thinking / mode switch cues
 import extras #time, calculator, conversions, notes, translate, web search, system status, power and more
 import music #spotify: play, pause, skip and what's playing, on any of your spotify devices
+import smarthome #lights, plugs, fans and scenes through home assistant or philips hue
 from imap_tools import MailBox
 from email.header import decode_header
 import requests
@@ -652,6 +653,7 @@ DEFAULT_SETTINGS={"voice": "google:com", "speed": 0, "pitch": 0, "volume": 100,
                   "phone_topic": "", "phone_when": "away", "phone_briefing": False,
                   "hw_alerts": True, "hw_alert_time": "16:00", "hw_lookahead": 24, "hw_before": 2,
                   "only_my_voice": False, "voice_fixes": True, "hf_token": "", "last_voice": "google:com", "music_panel": True, "auto_update": False,
+                  "smart_hidden": [], #smart home devices navi must not touch (settings > smart home)
                   "messages": {"greeting": enter_msg, "goodbye": exit_msg, "unclear": unclear_msg, "offline": offline_msg}}
 MESSAGE_KINDS={ #setting -> (name in the settings window, when navi says it, for the ai)
     "greeting": ("Greetings", "when it's woken up by its name"),
@@ -5766,6 +5768,8 @@ extras_context=extras.Context(say=lambda text, lang="en": text_to_speech(text, l
 music_context=music.Context(say=lambda text: text_to_speech(text), hear=lambda: hear(), said_yes=lambda text: said_yes(text),
                             data_path=lambda name: data_path(name), post=gui_post, open_url=webbrowser.open,
                             media_key=lambda action: media_command({"next": "next", "previous": "previous"}.get(action, "pause")))
+smarthome_context=smarthome.Context(say=lambda text: text_to_speech(text), hidden=lambda: settings["smart_hidden"],
+                                    post=gui_post, passthrough=(StopListening,))
 
 def handle_command(text):
     global navi
@@ -5777,6 +5781,8 @@ def handle_command(text):
     elif re.search(r"\bhomework (alerts?|heads.?ups?|warnings?)\b", t):
         homework_alerts_command(t)
     elif music.handle(text, music_context): #spotify (or the media keys if it isn't connected). Before extras so "repeat this song" is music
+        pass
+    elif smarthome.handle(text, smarthome_context): #lights, plugs, fans and scenes (before extras, so "dim the bedroom" isn't the screen)
         pass
     elif extras.handle(text, extras_context): #time, calculator, conversions, notes, translate, search, system, power...
         pass
@@ -6565,7 +6571,7 @@ class SettingsWindow:
         for name, build in (("Voice", self.voice_page), ("Voice training", self.training_page), ("Messages", self.messages_page),
                             ("Listening", self.listening_page),
                             ("Day briefing", self.briefing_page), ("Homework alerts", self.homework_page), ("Location", self.location_page),
-                            ("Phone alerts", self.phone_page), ("Music", self.music_page), ("Keys", self.keys_page), ("Calendar", self.calendar_page), ("Memory", self.memory_page),
+                            ("Phone alerts", self.phone_page), ("Music", self.music_page), ("Smart home", self.smart_home_page), ("Keys", self.keys_page), ("Calendar", self.calendar_page), ("Memory", self.memory_page),
                             ("Startup", self.startup_page), ("Updates", self.updates_page)):
             self.body=tk.Frame(stack, bg=c["bg"])
             self.body.grid(row=0, column=0, sticky="nsew")
@@ -6587,6 +6593,8 @@ class SettingsWindow:
             tab.configure(bg=NaviGUI.COLORS["accent" if n==name else "panel"])
         if name=="Memory":
             self.show_memories()
+        if name=="Smart home":
+            self.show_smart_devices()
 
     def in_background(self, work, done):
         #runs work() on another thread (network, sign-in...) and then done(result) back here; an error is passed as the result
@@ -6973,6 +6981,144 @@ class SettingsWindow:
         self.in_background(lambda: phone_alert("Navi", "This is a test. Phone alerts work!", force=True),
                            lambda ok: self.phone_status.configure(text="Sent. It should be on your phone now." if ok is True
                                                                   else "Couldn't send it. Check your internet."))
+
+    def smart_home_page(self):
+        #home assistant (address and token on the keys page), hue pairing, and devices navi must leave alone
+        c=NaviGUI.COLORS
+        self.section("Home Assistant")
+        self.label("1. In Home Assistant, click your name (bottom left), open Security, and under Long-lived access "
+                   "tokens press Create token.\n2. Put your Home Assistant address (like http://homeassistant.local:8123) "
+                   "and the token on the Keys page, and save.", muted=False)
+        self.buttons(("Keys page", lambda: self.show_page("Keys"), False), ("Test", self.test_home_assistant, True))
+        self.ha_status=self.label("")
+        self.section("Philips Hue")
+        self.label("1. Press Find bridge, or type its address.\n2. Press Pair, then press the round button on top of the "
+                   "bridge within 30 seconds.", muted=False)
+        row=tk.Frame(self.body, bg=c["bg"])
+        self.hue_bridge=self.entry(row, 22)
+        self.hue_bridge.insert(0, os.environ.get("HUE_BRIDGE", ""))
+        self.hue_bridge.pack(side="left", ipady=4)
+        self.gui.make_button(row, "Find bridge", self.find_hue).pack(side="left", padx=(6,0))
+        row.grid(row=self.row, column=0, columnspan=2, sticky="w", pady=(4,2))
+        self.row+=1
+        self.buttons(("Pair", self.pair_hue, True), ("Test", self.test_hue, False), ("Forget", self.forget_hue, False))
+        self.hue_status=self.label("Paired." if os.environ.get("HUE_KEY") else "")
+        self.section("Devices")
+        self.label("Lights, plugs, fans and scenes I can control. Locks, doors, alarms and thermostats are never touched. "
+                   "Select any others you want me to leave alone and press Hide.")
+        self.smart_list=tk.Listbox(self.body, width=58, height=8, font=(UI_FONT,10), bg=c["panel"], fg=c["text"],
+                                   selectbackground=c["accent"], relief="flat", highlightthickness=0, activestyle="none",
+                                   selectmode="extended")
+        self.smart_list.grid(row=self.row, column=0, columnspan=2, sticky="w", pady=(4,4))
+        self.row+=1
+        self.smart_keys=[]
+        self.buttons(("Refresh", self.show_smart_devices, False), ("Hide selected", self.hide_smart_devices, False),
+                     ("Show all", self.unhide_smart_devices, False))
+        self.smart_status=self.label("")
+
+    def test_home_assistant(self):
+        if not (os.environ.get("HA_URL") and os.environ.get("HA_TOKEN")):
+            self.ha_status.configure(text="Add the address and token on the Keys page first.")
+            return
+        self.ha_status.configure(text="Checking...")
+        def work():
+            return smarthome.HomeAssistant(os.environ["HA_URL"], os.environ["HA_TOKEN"]).check()
+        self.in_background(work, lambda r: (self.ha_status.configure(text=str(r)), self.show_smart_devices()
+                                            if not isinstance(r, Exception) else None))
+
+    def find_hue(self):
+        self.hue_status.configure(text="Looking for a Hue bridge...")
+        def done(found):
+            if isinstance(found, Exception) or not found:
+                self.hue_status.configure(text="I couldn't find one. Type its address (the Hue app shows it under Settings, My Hue system).")
+                return
+            self.hue_bridge.delete(0, "end")
+            self.hue_bridge.insert(0, found[0])
+            self.hue_status.configure(text=f"Found {found[0]}. Now press Pair.")
+        self.in_background(smarthome.hue_discover, done)
+
+    def pair_hue(self):
+        import navi_setup
+        bridge=self.hue_bridge.get().strip()
+        try:
+            bridge=smarthome.hue_host(bridge)
+        except smarthome.HubError as e:
+            self.hue_status.configure(text=str(e) if bridge else "Press Find bridge or type its address first.")
+            return
+        self.hue_status.configure(text="Press the round button on top of the bridge now...")
+        def work():
+            end=time.time()+30
+            while time.time()<end:
+                key=smarthome.hue_pair(bridge)
+                if key:
+                    values={"HUE_BRIDGE": bridge, "HUE_KEY": key}
+                    navi_setup.write_env(os.path.join(DATA_DIR, ".env"), values)
+                    apply_keys(values)
+                    smarthome.forget_cache()
+                    return smarthome.Hue(bridge, key).check()
+                time.sleep(2)
+            return None
+        def done(result):
+            if result is None:
+                self.hue_status.configure(text="The button wasn't pressed in time. Press Pair and try again.")
+            elif isinstance(result, Exception):
+                self.hue_status.configure(text=f"Pairing didn't work: {result}")
+            else:
+                self.hue_status.configure(text="Paired. "+result)
+                self.show_smart_devices()
+        self.in_background(work, done)
+
+    def test_hue(self):
+        if not (os.environ.get("HUE_BRIDGE") and os.environ.get("HUE_KEY")):
+            self.hue_status.configure(text="Pair the bridge first.")
+            return
+        self.hue_status.configure(text="Checking...")
+        self.in_background(lambda: smarthome.Hue(os.environ["HUE_BRIDGE"], os.environ["HUE_KEY"]).check(),
+                           lambda r: self.hue_status.configure(text=str(r)))
+
+    def forget_hue(self):
+        import navi_setup
+        values={"HUE_BRIDGE": "", "HUE_KEY": ""}
+        try:
+            navi_setup.write_env(os.path.join(DATA_DIR, ".env"), values)
+        except OSError as e:
+            self.hue_status.configure(text=f"Couldn't save: {e}")
+            return
+        apply_keys(values)
+        smarthome.forget_cache()
+        self.hue_status.configure(text="Forgot the Hue bridge.")
+
+    def show_smart_devices(self):
+        self.smart_status.configure(text="Loading...")
+        everything=types.SimpleNamespace(env=os.environ, hidden=lambda: [])
+        def done(result):
+            if not self.win.winfo_exists():
+                return
+            self.smart_list.delete(0, "end")
+            self.smart_keys=[]
+            if isinstance(result, Exception):
+                self.smart_status.configure(text=f"Couldn't load them: {result}")
+                return
+            devices, problems=result
+            hidden=set(settings["smart_hidden"])
+            for d in sorted(devices, key=lambda d: (d.kind, d.name.lower())):
+                self.smart_list.insert("end", f"{d.name}   ({d.kind}, {d.hub.label})"+("   hidden" if d.key in hidden else ""))
+                self.smart_keys.append(d.key)
+            self.smart_status.configure(text=" ".join(problems) if problems else
+                                        f"{len(devices)} devices." if devices else "No hub is set up yet.")
+        self.in_background(lambda: smarthome.all_devices(everything, fresh=True), done)
+
+    def hide_smart_devices(self):
+        picked=[self.smart_keys[i] for i in self.smart_list.curselection() if i<len(self.smart_keys)]
+        if picked:
+            self.set("smart_hidden", sorted(set(settings["smart_hidden"])|set(picked)))
+            smarthome.forget_cache()
+            self.show_smart_devices()
+
+    def unhide_smart_devices(self):
+        self.set("smart_hidden", [])
+        smarthome.forget_cache()
+        self.show_smart_devices()
 
     def keys_page(self):
         #every api key in .env: hidden until you press Show, saved to .env and used straight away (no restart)
