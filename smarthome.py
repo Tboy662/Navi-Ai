@@ -601,12 +601,13 @@ def parse(text):
         (r"(?:kill|shut off|shut down|cut)\s+(.+)$", lambda m: ("off", m.group(1))),
         (r"(.+?)\s+(on|off)$", lambda m: (m.group(2), m.group(1))),
         (r"(?:light up|illuminate)\s+(.+)$", lambda m: ("on", m.group(1))),
+        (r"(?:toggle|flip|switch)\s+(.+)$", lambda m: ("toggle", m.group(1))),
     ]
     for pattern, pick in patterns:
         m=re.match(pattern, t)
         if m:
             state, target=pick(m)
-            change={"on": state=="on"}
+            change={"toggle": True} if state=="toggle" else {"on": state=="on"}
             break
     if change is None:
         m=re.match(r"(?:activate|start|run|set|recall|use)\s+(?:the\s+|my\s+)?(.+?)\s+scene$|scene\s+(.+)$|"
@@ -852,6 +853,8 @@ def run(text, ctx):
             return True
         return False
     hits=[d for d in hits if d.available] or hits
+    if req["change"].get("toggle"): #anything on goes off, otherwise on
+        req["change"]={"on": not any(d.on for d in hits)}
     if req.get("delay"):
         return later(req["delay"], hits, req["change"], ctx)
     done, errs=apply(hits, req["change"])
