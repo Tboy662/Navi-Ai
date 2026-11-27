@@ -130,6 +130,28 @@ It can also run when Navi starts and when the PC wakes from sleep (Settings > Da
 | "shut down my computer", "restart my PC", "put my computer to sleep" | **New.** Asks first. Shut down and restart wait one minute so you can still stop them. |
 | "cancel the shutdown" | **New.** Stops a pending shut down or restart. |
 
+## Discord (New)
+
+| Say | What happens |
+| --- | --- |
+| "read the general channel on Discord", "read memes in my gaming server on Discord", "read Discord" | Reads the last 5 messages in that channel, oldest first, and shows them in the window. "Read Discord" reads the channel you read last. |
+| "anything new on Discord", "what's new in general on Discord", "catch me up on Discord" | Only the messages since Navi last read that channel. |
+| "tell general on Discord that I'm on my way", "send good game to memes on Discord", "send a Discord message to homework help" | Sends a message to a channel. Navi reads it back and only sends it after you say yes. If you didn't say the message, Navi asks for it. |
+| "message Henrik on Discord saying want to play later", "DM Alex on Discord" | Sends a direct message to someone in one of your servers, after you say yes. |
+| "join the Lobby voice channel", "hop into study room vc on Discord", "join voice on Discord" | Opens that voice channel in your Discord app so you join it as yourself. If Discord shows a Join Voice button, press it. |
+| "set up Discord" | Opens the page that adds your bot to a server. |
+
+Reading and sending go through a Discord bot that you make, once:
+
+1. In Settings > Keys, press **Get** next to Discord bot token. It opens the Discord developer portal. Press New Application and name it Navi.
+2. On the Bot page press Reset Token and copy it. On the same page turn on **Message Content Intent** (so the bot can read messages) and **Server Members Intent** (so it can find people to DM).
+3. Paste the token in Settings > Keys and press Save keys.
+4. Say "Navi, set up Discord" and pick your server on the page that opens.
+
+ Messages you send show up as sent by your bot, not by you. That's on purpose: Discord bans apps that sign in as you, so Navi never does. For the same reason Navi can't read your own DMs, only server channels the bot can see. Joining voice needs no bot, just the Discord app.
+
+When the same channel name is in two servers, Navi asks which one ("the first one", "the second one", or the server's name).
+
 ## AI modes
 
 | Say | What happens |
@@ -153,6 +175,7 @@ It can also run when Navi starts and when the PC wakes from sleep (Settings > Da
 - **Day briefing**: brief on start, brief on wake, how long asleep counts as a wake.
 - **Startup**: start with Windows.
 - **Listening**: offline wake word, saying "stop" to interrupt, only wake for my voice.
+- **Keys**: every API key, including the Discord bot token, saved to `.env` and used straight away.
 - **Location**: your city or exact address, Celsius or Fahrenheit, and food filters.
 - **Phone alerts**: reminders and briefings on your phone through the free ntfy app (always, only when you're away, or never).
 - **Calendar**: connect or disconnect Google Calendar.
@@ -170,6 +193,7 @@ These are the rules the features follow, and what was tested before this update 
 - **Web searches** only open fixed `https://` search pages with your words URL-encoded, so a search can't become a `javascript:` or `file:` link or point at another site.
 - **Notes** are saved to one fixed file; nothing you say becomes a file path. Notes are capped at 1000 characters and 500 notes, and a damaged notes file is ignored instead of crashing Navi.
 - **Closing apps** only sends the normal close message (like clicking X), skips Navi's own windows and the taskbar and desktop, and refuses vague targets like "close it" or "close everything".
-- **Private files stay out of git**: `.env`, settings, memory, notes, lists, reminders and Google sign-in files (`google_token.json`, `client_secret*.json`) are all in `.gitignore`.
+- **Discord** goes only through your own bot and Discord's official API, never your account. Messages are read back and need a yes, and can't ping @everyone, @here, roles or people (Discord is told not to turn any mentions into pings). Channels and people are only picked from what Discord lists, and only their number IDs go into addresses. What people wrote is only read out loud. Messages and channel names given to the AI are marked as data, and what it answers still needs your yes before anything is sent.
+- **Private files stay out of git**: `.env`, settings, memory, notes, Discord read history (`navi_discord.json`), lists, reminders and Google sign-in files (`google_token.json`, `client_secret*.json`) are all in `.gitignore`.
 
 Tests for the new commands (about 80 checks, including the attacks above) were run against `extras.py` before committing.

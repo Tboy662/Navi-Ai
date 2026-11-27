@@ -51,6 +51,7 @@ import python_weather
 import threading
 import sounds #soft thinking / mode switch cues
 import extras #time, calculator, conversions, notes, translate, web search, system status, power and more
+import discord_control #read and send discord messages through your bot, open voice channels
 from imap_tools import MailBox
 from email.header import decode_header
 import requests
@@ -5540,6 +5541,8 @@ def handle_command(text):
         text_to_speech(random_message("goodbye"))
         navi=False
         gui_post("awake", False)
+    elif discord_control.handle(text, extras_context): #discord: read a channel, send a message (after a yes), join voice
+        pass
     elif extras.handle(text, extras_context): #time, calculator, conversions, notes, translate, search, system, power...
         pass
     elif re.search(r"\bremember\b|\bforget\b|\bwhat do you know about me\b", t):
