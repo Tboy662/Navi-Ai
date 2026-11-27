@@ -130,6 +130,19 @@ It can also run when Navi starts and when the PC wakes from sleep (Settings > Da
 | "shut down my computer", "restart my PC", "put my computer to sleep" | **New.** Asks first. Shut down and restart wait one minute so you can still stop them. |
 | "cancel the shutdown" | **New.** Stops a pending shut down or restart. |
 
+## Dictation (New)
+
+| Say | What happens |
+| --- | --- |
+| "start dictation", "dictation mode", "dictate", "type what I say", "start voice typing" | Navi types everything you say into the window you're using (Word, Google Docs, Discord, Notepad, a browser box...) until you stop it. Click where the text should go first. |
+| "stop dictation", "end dictation", "stop typing", "I'm done dictating" | Ends dictation. It also works at the end of a sentence: "see you tomorrow stop dictation" types "See you tomorrow" and then stops. |
+| "scratch that", "undo that", "delete that" | Takes back the last thing you said. |
+| "period", "comma", "question mark", "exclamation point", "colon", "semicolon" | Punctuation. |
+| "new line" (or "press enter"), "new paragraph" | Presses Enter once or twice. In chat apps, Enter sends the message. |
+| "open quote", "close quote", "open paren", "close paren", "hyphen", "dash", "ellipsis", "press tab" | More symbols, and the Tab key. |
+
+Sentences start with a capital letter and spaces go in the right places. Words like "period" and "comma" always become punctuation while dictating. Works on Windows and macOS (on a Mac, allow Navi, or the Terminal you start it from, under System Settings > Privacy & Security > Accessibility the first time).
+
 ## AI modes
 
 | Say | What happens |
@@ -170,6 +183,7 @@ These are the rules the features follow, and what was tested before this update 
 - **Web searches** only open fixed `https://` search pages with your words URL-encoded, so a search can't become a `javascript:` or `file:` link or point at another site.
 - **Notes** are saved to one fixed file; nothing you say becomes a file path. Notes are capped at 1000 characters and 500 notes, and a damaged notes file is ignored instead of crashing Navi.
 - **Closing apps** only sends the normal close message (like clicking X), skips Navi's own windows and the taskbar and desktop, and refuses vague targets like "close it" or "close everything".
+- **Dictation never types into a terminal** (Command Prompt, PowerShell, Windows Terminal, macOS Terminal, iTerm and others) or the Windows Run box, because "new line" presses Enter and would run what was typed as a command. It also won't type into Navi's own window. "Stop dictation" is checked before anything is typed, so the stop phrase itself never ends up in your text. On a Mac the text goes to System Events as an argument, never pasted into the AppleScript.
 - **Private files stay out of git**: `.env`, settings, memory, notes, lists, reminders and Google sign-in files (`google_token.json`, `client_secret*.json`) are all in `.gitignore`.
 
 Tests for the new commands (about 80 checks, including the attacks above) were run against `extras.py` before committing.
