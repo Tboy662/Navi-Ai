@@ -65,6 +65,21 @@ Notes are kept in `navi_notes.json` next to `voice.py`, which is never committed
 | "remember that I'm allergic to peanuts" | Navi remembers it and the AI uses it when it helps. |
 | "what do you know about me", "forget that I'm allergic to peanuts", "forget everything" | Reads or forgets memories. |
 
+## Phone texts (New)
+
+Works on Windows through the **Phone Link** app. Link your phone in Phone Link and turn on messages there first.
+
+| Say | What happens |
+| --- | --- |
+| "read my texts", "any new texts", "did anyone text me" | Reads your new texts out loud (the newest five), and offers to reply when they're all from one person. Hebrew texts are read in Hebrew. Links are said as "a link". |
+| "what did mom text me", "read my texts from Dana" | Reads the last text from that person, then offers to reply. |
+| "text mom I'm on my way", "send a text to Dana saying I'll be late", "text 054 123 4567" | Navi reads the text back and asks first. Say yes to send, "change it to ..." or any change you want, or cancel. If two contacts fit the name, Navi asks which one. |
+| "reply to Dana's text", "reply to the last text saying sounds good" | A reply to that person (or whoever texted last), sent only after you say yes. |
+
+- A heads-up when a new text comes in ("New text from Mom"), and optionally the text read out too: Settings > Phone alerts > Texts.
+- Sending: if **KDE Connect** is installed and your Android phone is connected to it, Navi sends through it, which is the most reliable. Otherwise Navi opens Phone Link and types the text in for you, so Phone Link comes to the front for a moment. This needs `pip install pywinauto`.
+- Navi reads a copy of Phone Link's message list on this PC and never changes it. Texts are only spoken, never sent to the AI. Which texts Navi already read out is kept in `navi_texts_seen.json`, which is never committed to git.
+
 ## Email (Gmail)
 
 | Say | What happens |
@@ -231,7 +246,7 @@ When the same channel name is in two servers, Navi asks which one ("the first on
 - **Keys**: every API key, including the Discord bot token, saved to `.env` and used straight away.
 - **Location**: your city or exact address, Celsius or Fahrenheit, and food filters.
 - **Smart home**: test Home Assistant, find and pair a Hue bridge, see your devices and hide any Navi should leave alone.
-- **Phone alerts**: reminders and briefings on your phone through the free ntfy app (always, only when you're away, or never).
+- **Phone alerts**: reminders and briefings on your phone through the free ntfy app (always, only when you're away, or never). **New:** a Texts section to hear when a new text comes in, and to have it read out.
 - **Calendar**: connect or disconnect Google Calendar.
 - **Music**: connect or disconnect Spotify, the address to give Spotify when you make the app, and whether the orb shows what's playing.
 - **Memory**: see, add and forget what Navi remembers.

@@ -60,6 +60,7 @@ import extras #time, calculator, conversions, notes, translate, web search, syst
 import music #spotify: play, pause, skip and what's playing, on any of your spotify devices
 import smarthome #lights, plugs, fans and scenes through home assistant or philips hue
 import discord_control #read and send discord messages through your bot, open voice channels
+import texts #phone texts through phone link: read them out, reply by voice, new text alerts
 from imap_tools import MailBox
 from email.header import decode_header
 import requests
@@ -652,7 +653,7 @@ SETTINGS_FILE=os.path.join(os.path.dirname(os.path.abspath(__file__)), "navi_set
 DEFAULT_SETTINGS={"voice": "google:com", "speed": 0, "pitch": 0, "volume": 100,
                   "brief_on_start": True, "brief_on_wake": True, "wake_minutes": 5, "listen_pause": 2.0,
                   "city": "", "precise_location": True, "diet": [], "units": "C", "offline_wake": True, "voice_stop": True,
-                  "phone_topic": "", "phone_when": "away", "phone_briefing": False,
+                  "phone_topic": "", "phone_when": "away", "phone_briefing": False, "text_alerts": True, "text_alerts_read": False,
                   "hw_alerts": True, "hw_alert_time": "16:00", "hw_lookahead": 24, "hw_before": 2,
                   "only_my_voice": False, "voice_fixes": True, "hf_token": "", "last_voice": "google:com", "music_panel": True, "auto_update": False,
                   "smart_hidden": [], #smart home devices navi must not touch (settings > smart home)
@@ -5831,6 +5832,7 @@ def start_everyday_tools():
     threading.Thread(target=reminder_watcher, daemon=True).start()
     threading.Thread(target=homework_alert_watcher, daemon=True).start() #spoken heads-up for homework due soon
     music.start(music_context) #what's playing on spotify, for the orb (only asks spotify once you've connected it)
+    threading.Thread(target=texts.alert_watcher, args=(texts_context, stop_event), daemon=True).start()
     if settings["voice"]=="clone:mine" and TrainedVoice.ready(): #loads the trained voice now, so the first reply isn't slow
         threading.Thread(target=TrainedVoice.ask, args=({"cmd": "ping"},), daemon=True).start()
 
@@ -5861,6 +5863,12 @@ def hear_dictation():
     gui_post("you", text)
     return text
 
+texts_context=texts.Context(say=lambda text, lang="en": text_to_speech(text, lang), hear=lambda: hear(), said_yes=said_yes,
+                            ai_json=lambda prompt: ai_json(prompt), setting=lambda key: settings[key],
+                            data_path=lambda name: data_path(name), post=gui_post,
+                            announce=lambda text, lang="en": briefing_say(text) if lang=="en" else text_to_speech(text, lang),
+                            passthrough=(StopListening,))
+
 def handle_command(text):
     global navi
     t=text.lower()
@@ -5879,6 +5887,8 @@ def handle_command(text):
     elif discord_control.handle(text, extras_context): #discord: read a channel, send a message (after a yes), join voice
         pass
     elif extras.handle(text, extras_context): #time, calculator, conversions, notes, translate, search, system, power...
+        pass
+    elif texts.handle(text, texts_context): #"read my texts", "text mom I'm on my way": sent only after a yes
         pass
     elif re.search(r"\bremember\b|\bforget\b|\bwhat do you know about me\b", t):
         memory_command(text)
@@ -7059,6 +7069,11 @@ class SettingsWindow:
         self.check("Also send the day briefing", "phone_briefing")
         self.buttons(("Send test", self.test_phone, True))
         self.phone_status=self.label("")
+        self.section("Texts")
+        self.label("Navi reads your texts and sends replies through the Phone Link app. Link your phone there and turn on "
+                   "messages. Navi always reads a text back to you and waits for a yes before sending it.")
+        self.check("Tell me when a new text comes in", "text_alerts")
+        self.check("Also read the new text out loud", "text_alerts_read")
 
     def new_topic(self):
         self.topic.delete(0, "end")
