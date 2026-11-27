@@ -83,6 +83,7 @@ Notes are kept in `navi_notes.json` next to `voice.py`, which is never committed
 | "announcements" | Announcements from the last two weeks, and reads the newest if you want. |
 | "feedback", "comments" | Recent teacher comments on your work. |
 | "study mode", "study" | The AI quizzes you on an upcoming test, using the test's Canvas description. |
+| "turn homework alerts off", "homework alerts on", "are homework alerts on" | **New.** Homework alerts: once a day (4 PM by default) Navi tells you what's due on Canvas in the next 24 hours, and warns you again 2 hours before each due time. The time, the lookahead and the warning are in Settings > Homework alerts. They go to your phone too if Phone alerts are on. |
 
 ## Calendar (Google Calendar)
 
@@ -151,6 +152,7 @@ It can also run when Navi starts and when the PC wakes from sleep (Settings > Da
 - **Voice**: 20+ voices (Google accents, Microsoft Edge neural voices, or your own trained voice), speed, pitch and volume.
 - **Voice training**: read some sentences once, and Navi can speak in your voice, wake only for your voice, and learn words Google often mishears from you.
 - **Day briefing**: brief on start, brief on wake, how long asleep counts as a wake.
+- **Homework alerts**: on or off, the time of the daily heads-up, how many hours it looks ahead, how long before each due time the second warning comes (0 = off), and Check now.
 - **Startup**: start with Windows.
 - **Listening**: offline wake word, saying "stop" to interrupt, only wake for my voice.
 - **Location**: your city or exact address, Celsius or Fahrenheit, and food filters.

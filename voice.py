@@ -644,6 +644,7 @@ DEFAULT_SETTINGS={"voice": "google:com", "speed": 0, "pitch": 0, "volume": 100,
                   "brief_on_start": True, "brief_on_wake": True, "wake_minutes": 5, "listen_pause": 2.0,
                   "city": "", "precise_location": True, "diet": [], "units": "C", "offline_wake": True, "voice_stop": True,
                   "phone_topic": "", "phone_when": "away", "phone_briefing": False,
+                  "hw_alerts": True, "hw_alert_time": "16:00", "hw_lookahead": 24, "hw_before": 2,
                   "only_my_voice": False, "voice_fixes": True, "hf_token": "", "last_voice": "google:com",
                   "messages": {"greeting": enter_msg, "goodbye": exit_msg, "unclear": unclear_msg, "offline": offline_msg}}
 MESSAGE_KINDS={ #setting -> (name in the settings window, when navi says it, for the ai)
@@ -4203,6 +4204,175 @@ def reminders_today():
     end=datetime.combine(datetime.now().date()+timedelta(days=1), datetime.min.time()).timestamp()
     return [reminder_line(r) for r in sorted(reminders(), key=lambda r: r["due"]) if r["due"]<end]
 
+#homework alerts: a spoken heads-up for canvas work that's due soon. Once a day at the time in the settings it lists
+#what's due in the next few hours (the lookahead), and it also warns about each one a set number of hours before it's due
+HW_ALERT_FILE="navi_hw_alerts.json" #which day the daily heads-up was said, and which items were already warned about
+HW_POLL_SECONDS=600 #how often canvas is asked for the before-due warnings
+HW_LATE_HOURS=3 #if navi was closed or the pc asleep at the alert time, the heads-up is still said this long after it
+hw_alert_lock=threading.Lock()
+
+def parse_clock(text):
+    #"16:00", "4:30 pm", "7 am" -> (hour, minute), or None
+    m=re.fullmatch(r"\s*(\d{1,2})(?:[:.](\d{2}))?\s*(?:([ap])\.?\s*m?\.?)?\s*", (text or "").lower())
+    if not m:
+        return None
+    hour, minute=int(m.group(1)), int(m.group(2) or 0)
+    if m.group(3):
+        if not 1<=hour<=12:
+            return None
+        hour=hour%12+(12 if m.group(3)=="p" else 0)
+    elif m.group(2) is None:
+        return None #a bare "7" could be morning or evening
+    return (hour, minute) if hour<24 and minute<60 else None
+
+def due_timestamp(item):
+    from datetime import datetime
+    due=item.get("plannable_date")
+    try:
+        return datetime.fromisoformat(due.replace("Z","+00:00")).timestamp() if due else None
+    except (ValueError, AttributeError):
+        return None
+
+def homework_key(item):
+    return f"{item.get('plannable_type')}:{item.get('plannable_id')}"
+
+def homework_due_within(items, hours, now=None):
+    #the items due between now and that many hours from now, soonest first
+    now=time.time() if now is None else now
+    soon=[(ts, i) for i in items if (ts:=due_timestamp(i)) and now<ts<=now+hours*3600]
+    return [i for ts, i in sorted(soon, key=lambda p: p[0])]
+
+def hours_text(hours):
+    #24 -> "24 hours", 48 -> "2 days", 1 -> "hour"
+    if hours==1:
+        return "hour"
+    return f"{hours//24} days" if hours>24 and hours%24==0 else f"{hours} hours"
+
+def homework_line(item, now=None):
+    #"the test Unit 3 Exam for MATH101, due in 2 hours" (or "due tomorrow at 9 AM" when it's further off)
+    now=time.time() if now is None else now
+    left=due_timestamp(item)-now
+    when=f"in {duration_text(max(60, round(left/60)*60))}" if left<3*3600 else when_text(due_timestamp(item))
+    test="the test " if "fair asmt" in canvas_title(item).lower() else ""
+    return f"{test}{short_title(item)} for {course_code(item)}, due {when}"
+
+def homework_heads_up(items, hours, now=None):
+    #the daily heads-up, as one spoken message ("" when nothing is due)
+    if not items:
+        return ""
+    lines="; ".join(homework_line(i, now) for i in items[:6])
+    head=f"Homework heads-up: {len(items)} thing{'s are' if len(items)>1 else ' is'} due in the next {hours_text(hours)}."
+    more=f" And {len(items)-6} more." if len(items)>6 else ""
+    return f"{head} {lines[:1].upper()}{lines[1:]}.{more}"
+
+def homework_alert_check(items, state, now=None, daily=False):
+    #what to say now: the daily heads-up (if daily) and a warning for each item that just got close to its due time.
+    #state is changed in place: it remembers the day and the warned items, so nothing is said twice
+    from datetime import datetime
+    now=time.time() if now is None else now
+    out=[]
+    warned=state.setdefault("warned", {})
+    before=max(0, int(settings["hw_before"]))
+    close=homework_due_within(items, before, now) if before else []
+    if daily:
+        state["day"]=datetime.fromtimestamp(now).date().isoformat()
+        hours=max(1, int(settings["hw_lookahead"]))
+        soon=homework_due_within(items, hours, now)
+        msg=homework_heads_up(soon, hours, now)
+        if msg:
+            out.append(msg)
+        for i in soon: #the heads-up already named these: no second warning for the same due time
+            if i in close:
+                warned[homework_key(i)]=due_timestamp(i)
+    for i in close:
+        key, ts=homework_key(i), due_timestamp(i)
+        if warned.get(key)==ts:
+            continue
+        warned[key]=ts
+        out.append(f"Heads-up: {homework_line(i, now)}.")
+    for key, ts in list(warned.items()): #forget items that are long past
+        if not isinstance(ts, (int, float)) or ts<now-2*86400:
+            del warned[key]
+    return out
+
+def homework_daily_due(state, now=None):
+    #true once a day, from the alert time until HW_LATE_HOURS after it
+    from datetime import datetime, timedelta
+    clock=parse_clock(settings["hw_alert_time"])
+    if not clock:
+        return False
+    now=datetime.fromtimestamp(time.time() if now is None else now)
+    at=now.replace(hour=clock[0], minute=clock[1], second=0, microsecond=0)
+    return at<=now<=at+timedelta(hours=HW_LATE_HOURS) and state.get("day")!=now.date().isoformat()
+
+def homework_alert_watcher():
+    last_poll=0.0
+    while not stop_event.is_set():
+        time.sleep(30)
+        if not settings["hw_alerts"] or not (CANVAS_URL and CANVAS_API_KEY):
+            continue
+        with hw_alert_lock:
+            state=load_json(HW_ALERT_FILE, {})
+            if not isinstance(state, dict):
+                state={}
+            daily=homework_daily_due(state)
+            if not daily and (settings["hw_before"]<=0 or time.time()-last_poll<HW_POLL_SECONDS):
+                continue
+            if screen_locked(): #nobody's there to hear it: wait until they sign back in
+                continue
+            last_poll=time.time()
+            try:
+                items=canvas_pending()
+            except (requests.RequestException, ValueError) as e:
+                print("homework alert canvas err;", type(e).__name__)
+                continue
+            said=homework_alert_check(items, state, daily=daily)
+            try:
+                save_json(HW_ALERT_FILE, state)
+            except OSError as e:
+                print("homework alert save err; {0}".format(e))
+        for msg in said:
+            threading.Thread(target=phone_alert, args=("Homework due soon", msg), daemon=True).start()
+            briefing_say(msg) #the listener ignores navi's own voice while this plays
+
+def homework_alerts_summary():
+    from datetime import datetime
+    if not settings["hw_alerts"]:
+        return "Homework alerts are off. Say turn homework alerts on, or use Settings."
+    clock=parse_clock(settings["hw_alert_time"])
+    daily=(f"Every day at {clock_text(datetime(2000, 1, 1, *clock))} I tell you what's due in the next {hours_text(int(settings['hw_lookahead']))}"
+           if clock else "The daily heads-up is off, because its time in Settings isn't a time I understand")
+    before=int(settings["hw_before"])
+    return daily+(f", and I warn you {'an hour' if before==1 else hours_text(before)} before each one is due." if before else ".")
+
+def homework_alerts_command(t):
+    #"turn homework alerts off", "homework alerts on", "are homework alerts on?"
+    if re.search(r"\b(off|stop|disable|no more|mute)\b", t):
+        settings["hw_alerts"]=False
+        save_settings()
+        text_to_speech("Okay, homework alerts are off.")
+    elif re.search(r"\b(on|start|enable)\b", t) and not re.search(r"\b(are|is)\b.*\bon\b", t):
+        settings["hw_alerts"]=True
+        save_settings()
+        text_to_speech("Homework alerts are on. "+(homework_alerts_summary() if CANVAS_URL and CANVAS_API_KEY
+                                                    else "Canvas isn't set up yet, so add it in Settings, Keys."))
+    else:
+        text_to_speech(homework_alerts_summary())
+
+def homework_alert_now():
+    #settings > homework alerts > check now: says what's due in the lookahead window right away
+    if not (CANVAS_URL and CANVAS_API_KEY):
+        text_to_speech("Canvas is not set up. Please add your Canvas address and token in Settings, Keys.")
+        return
+    try:
+        items=canvas_pending()
+    except (requests.RequestException, ValueError) as e:
+        print("canvas err;", type(e).__name__)
+        text_to_speech("I couldn't reach Canvas right now.")
+        return
+    hours=max(1, int(settings["hw_lookahead"]))
+    text_to_speech(homework_heads_up(homework_due_within(items, hours), hours) or f"Nothing is due on Canvas in the next {hours_text(hours)}.")
+
 #lists: a to-do list, a shopping list, or any other list you name
 def lists():
     data=load_json(LIST_FILE, {})
@@ -5524,6 +5694,7 @@ class VoiceTrainingWindow:
 
 def start_everyday_tools():
     threading.Thread(target=reminder_watcher, daemon=True).start()
+    threading.Thread(target=homework_alert_watcher, daemon=True).start() #spoken heads-up for homework due soon
     if settings["voice"]=="clone:mine" and TrainedVoice.ready(): #loads the trained voice now, so the first reply isn't slow
         threading.Thread(target=TrainedVoice.ask, args=({"cmd": "ping"},), daemon=True).start()
 
@@ -5540,6 +5711,8 @@ def handle_command(text):
         text_to_speech(random_message("goodbye"))
         navi=False
         gui_post("awake", False)
+    elif re.search(r"\bhomework (alerts?|heads.?ups?|warnings?)\b", t):
+        homework_alerts_command(t)
     elif extras.handle(text, extras_context): #time, calculator, conversions, notes, translate, search, system, power...
         pass
     elif re.search(r"\bremember\b|\bforget\b|\bwhat do you know about me\b", t):
@@ -6042,7 +6215,7 @@ class SettingsWindow:
         self.pages, self.tabs={}, {}
         for name, build in (("Voice", self.voice_page), ("Voice training", self.training_page), ("Messages", self.messages_page),
                             ("Listening", self.listening_page),
-                            ("Day briefing", self.briefing_page), ("Location", self.location_page),
+                            ("Day briefing", self.briefing_page), ("Homework alerts", self.homework_page), ("Location", self.location_page),
                             ("Phone alerts", self.phone_page), ("Keys", self.keys_page), ("Calendar", self.calendar_page), ("Memory", self.memory_page),
                             ("Startup", self.startup_page)):
             self.body=tk.Frame(stack, bg=c["bg"])
@@ -6246,6 +6419,53 @@ class SettingsWindow:
         spin.bind("<KeyRelease>", lambda e: self.set_minutes())
         self.place("Only after sleeping (min)", spin)
         self.buttons(("Brief me now", lambda: self.gui.run_task(day_briefing, "ask"), False))
+
+    def homework_page(self):
+        self.section("Homework alerts")
+        self.label("A spoken heads-up for Canvas work that's due soon. Once a day I tell you what's due in the next few "
+                   "hours, and I warn you again shortly before each one is due. If Phone alerts are on, they go to your phone too.")
+        self.check("Warn me about homework that's due soon", "hw_alerts")
+        self.hw_time=self.entry(self.body, 10)
+        self.hw_time.insert(0, settings["hw_alert_time"])
+        self.hw_time.bind("<KeyRelease>", lambda e: self.set_hw_time())
+        self.place("Daily heads-up at", self.hw_time)
+        self.hw_time_note=self.label("")
+        self.spin("Look ahead (hours)", "hw_lookahead", 1, 168)
+        self.label("The daily heads-up lists what's due within this many hours (24 is the next day, 168 a week).")
+        self.spin("Also warn me (hours before)", "hw_before", 0, 48)
+        self.label("A second, short warning this many hours before each due time. 0 turns it off.")
+        self.label("Canvas: "+("connected." if CANVAS_URL and CANVAS_API_KEY else "not set up yet. Add your Canvas address and token on the Keys page."),
+                   muted=bool(CANVAS_URL and CANVAS_API_KEY))
+        self.buttons(("Check now", lambda: self.gui.run_task(homework_alert_now), False))
+        self.set_hw_time()
+
+    def set_hw_time(self):
+        text=self.hw_time.get().strip()
+        clock=parse_clock(text)
+        if clock:
+            self.set("hw_alert_time", f"{clock[0]:02d}:{clock[1]:02d}")
+            from datetime import datetime
+            self.hw_time_note.configure(text=f"Every day at {clock_text(datetime(2000, 1, 1, *clock))}.")
+        else:
+            self.hw_time_note.configure(text="Type a time like 16:00 or 4 pm.")
+
+    def spin(self, label, key, low, high):
+        #a number box that saves as you change it (ignores anything that isn't a whole number in range)
+        c=NaviGUI.COLORS
+        var=tk.StringVar(value=str(settings[key]))
+        def changed():
+            try:
+                n=int(var.get())
+            except ValueError:
+                return
+            if low<=n<=high:
+                self.set(key, n)
+        box=tk.Spinbox(self.body, from_=low, to=high, width=5, textvariable=var, command=changed,
+                       font=(UI_FONT,10), bg=c["panel"], fg=c["text"], buttonbackground=c["panel"],
+                       insertbackground=c["text"], relief="flat", justify="center")
+        box.bind("<KeyRelease>", lambda e: changed())
+        self.place(label, box)
+        return box
 
     def startup_page(self):
         self.section("Startup")

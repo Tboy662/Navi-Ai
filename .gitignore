@@ -15,6 +15,7 @@ ai_model_status.json
 navi_notes.json
 navi_lists.json
 navi_reminders.json
+navi_hw_alerts.json
 google_token.json
 google_credentials.json
 client_secret*.json
