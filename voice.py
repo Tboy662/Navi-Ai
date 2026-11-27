@@ -51,6 +51,7 @@ import python_weather
 import threading
 import sounds #soft thinking / mode switch cues
 import extras #time, calculator, conversions, notes, translate, web search, system status, power and more
+import texts #phone texts through phone link: read them out, reply by voice, new text alerts
 from imap_tools import MailBox
 from email.header import decode_header
 import requests
@@ -643,7 +644,7 @@ SETTINGS_FILE=os.path.join(os.path.dirname(os.path.abspath(__file__)), "navi_set
 DEFAULT_SETTINGS={"voice": "google:com", "speed": 0, "pitch": 0, "volume": 100,
                   "brief_on_start": True, "brief_on_wake": True, "wake_minutes": 5, "listen_pause": 2.0,
                   "city": "", "precise_location": True, "diet": [], "units": "C", "offline_wake": True, "voice_stop": True,
-                  "phone_topic": "", "phone_when": "away", "phone_briefing": False,
+                  "phone_topic": "", "phone_when": "away", "phone_briefing": False, "text_alerts": True, "text_alerts_read": False,
                   "only_my_voice": False, "voice_fixes": True, "hf_token": "", "last_voice": "google:com",
                   "messages": {"greeting": enter_msg, "goodbye": exit_msg, "unclear": unclear_msg, "offline": offline_msg}}
 MESSAGE_KINDS={ #setting -> (name in the settings window, when navi says it, for the ai)
@@ -5524,6 +5525,7 @@ class VoiceTrainingWindow:
 
 def start_everyday_tools():
     threading.Thread(target=reminder_watcher, daemon=True).start()
+    threading.Thread(target=texts.alert_watcher, args=(texts_context, stop_event), daemon=True).start()
     if settings["voice"]=="clone:mine" and TrainedVoice.ready(): #loads the trained voice now, so the first reply isn't slow
         threading.Thread(target=TrainedVoice.ask, args=({"cmd": "ping"},), daemon=True).start()
 
@@ -5532,6 +5534,11 @@ extras_context=extras.Context(say=lambda text, lang="en": text_to_speech(text, l
                               ai_text=lambda prompt: ai_text(prompt), add_timer=lambda seconds, what="": add_timer(seconds, what),
                               last_reply=lambda: last_spoken, data_path=lambda name: data_path(name), post=gui_post,
                               passthrough=(StopListening,))
+texts_context=texts.Context(say=lambda text, lang="en": text_to_speech(text, lang), hear=lambda: hear(), said_yes=said_yes,
+                            ai_json=lambda prompt: ai_json(prompt), setting=lambda key: settings[key],
+                            data_path=lambda name: data_path(name), post=gui_post,
+                            announce=lambda text, lang="en": briefing_say(text) if lang=="en" else text_to_speech(text, lang),
+                            passthrough=(StopListening,))
 
 def handle_command(text):
     global navi
@@ -5541,6 +5548,8 @@ def handle_command(text):
         navi=False
         gui_post("awake", False)
     elif extras.handle(text, extras_context): #time, calculator, conversions, notes, translate, search, system, power...
+        pass
+    elif texts.handle(text, texts_context): #"read my texts", "text mom I'm on my way": sent only after a yes
         pass
     elif re.search(r"\bremember\b|\bforget\b|\bwhat do you know about me\b", t):
         memory_command(text)
@@ -6330,6 +6339,11 @@ class SettingsWindow:
         self.check("Also send the day briefing", "phone_briefing")
         self.buttons(("Send test", self.test_phone, True))
         self.phone_status=self.label("")
+        self.section("Texts")
+        self.label("Navi reads your texts and sends replies through the Phone Link app. Link your phone there and turn on "
+                   "messages. Navi always reads a text back to you and waits for a yes before sending it.")
+        self.check("Tell me when a new text comes in", "text_alerts")
+        self.check("Also read the new text out loud", "text_alerts_read")
 
     def new_topic(self):
         self.topic.delete(0, "end")

@@ -13,6 +13,7 @@ navi_settings.json
 navi_memory.json
 ai_model_status.json
 navi_notes.json
+navi_texts_seen.json
 navi_lists.json
 navi_reminders.json
 google_token.json
