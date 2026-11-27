@@ -55,6 +55,7 @@ except (ImportError, ValueError): #not on every mac python: just the few types t
 import python_weather
 import threading
 import sounds #soft thinking / mode switch cues
+import dictation #"start dictation": types what you say into the window you're using
 import extras #time, calculator, conversions, notes, translate, web search, system status, power and more
 import music #spotify: play, pause, skip and what's playing, on any of your spotify devices
 import smarthome #lights, plugs, fans and scenes through home assistant or philips hue
@@ -5843,6 +5844,22 @@ music_context=music.Context(say=lambda text: text_to_speech(text), hear=lambda: 
 smarthome_context=smarthome.Context(say=lambda text: text_to_speech(text), hidden=lambda: settings["smart_hidden"],
                                     post=gui_post, passthrough=(StopListening,))
 
+def hear_dictation():
+    #one thing said while dictating: "" if it was unclear (said nothing back, so it isn't typed or spoken over),
+    #None if speech recognition can't be reached
+    audio=get_mic_input()
+    if briefing_heard() or training_active.is_set(): #navi's own voice from the speakers
+        return ""
+    try:
+        text=apply_voice_fixes(sr.Recognizer().recognize_google(audio))
+    except sr.UnknownValueError:
+        return ""
+    except sr.RequestError as e:
+        gui_post("system", "Connection error: {0}".format(e))
+        return None
+    gui_post("you", text)
+    return text
+
 def handle_command(text):
     global navi
     t=text.lower()
@@ -5856,6 +5873,8 @@ def handle_command(text):
         pass
     elif smarthome.handle(text, smarthome_context): #lights, plugs, fans and scenes (before extras, so "dim the bedroom" isn't the screen)
         pass
+    elif dictation.start_request(t): #types what you say into the focused window until "stop dictation"
+        dictation.run(say=lambda words: text_to_speech(words), listen=hear_dictation, post=gui_post)
     elif extras.handle(text, extras_context): #time, calculator, conversions, notes, translate, search, system, power...
         pass
     elif re.search(r"\bremember\b|\bforget\b|\bwhat do you know about me\b", t):
