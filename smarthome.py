@@ -402,8 +402,7 @@ class TPLink:
             await light.set_hsv(round(h*360)%360, round(s*100), max(1, light.brightness or 100))
         if light and "kelvin" in change and light.has_feature("color_temp"):
             await light.set_color_temp(change["kelvin"])
-        if not d.is_on:
-            await d.turn_on()
+        await d.turn_on() #always: is_on is only as fresh as the last update, so it can't be trusted to skip this
 
     def apply(self, device, change):
         try:
