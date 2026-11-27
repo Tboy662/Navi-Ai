@@ -61,6 +61,7 @@ import music #spotify: play, pause, skip and what's playing, on any of your spot
 import smarthome #lights, plugs, fans and scenes through home assistant or philips hue
 import discord_control #read and send discord messages through your bot, open voice channels
 import texts #phone texts through phone link: read them out, reply by voice, new text alerts
+import phone #navi on your phone: a home screen web app that talks to navi on this pc
 from imap_tools import MailBox
 from email.header import decode_header
 import requests
@@ -185,6 +186,9 @@ if not any(provider_key(m.split(":", 1)[0]) for m in [ai_model]+ai_fallback_mode
 class StopListening(Exception):
     pass
 def gui_post(kind, value):
+    session=phone.current()
+    if session and kind=="system": #notes, translations and other things navi shows: the phone sees them too
+        session.add("system", text=str(value))
     if gui_queue is not None:
         gui_queue.put((kind, value))
 def has_word(text, *words):
@@ -777,6 +781,11 @@ def text_to_speech(text, lang='en', voice=None):
     gui_post("navi", text)
     if lang=="en":
         last_spoken=text
+    session=phone.current()
+    if session: #a command sent from the phone: the reply goes back to it (and only out loud here if you want)
+        session.add("navi", text=text, lang=lang)
+        if not phone.setting("pc_voice"):
+            return
     with speak_lock:
         gui_post("status", "speaking")
         filename = "output.mp3"
@@ -802,6 +811,9 @@ def text_to_speech(text, lang='en', voice=None):
     gui_post("status", "idle")
 #get mic func
 def get_mic_input():
+    session=phone.current()
+    if session: #a command from the phone asking something back: the phone's next message is the answer
+        return phone.Heard(session.hear())
     rec=sr.Recognizer()
     profile=voice_profile()
     if profile and profile.get("energy_threshold"): #how loud your voice and room are, from voice training
@@ -824,6 +836,9 @@ def get_mic_input():
             except sr.WaitTimeoutError:
                 pass
 def convert_audio_to_text(audio):
+    if isinstance(audio, phone.Heard):
+        gui_post("you", audio.text)
+        return audio.text
     rec=sr.Recognizer()
     try:
         text = apply_voice_fixes(rec.recognize_google(audio)) #words google often mishears for your voice, from voice training
@@ -5940,6 +5955,29 @@ def handle_command(text):
     elif t.strip(): #anything else: a quick spoken answer from the ai, like the ask box
         text_to_speech(ai_get_response(ai_prompts_prev[0]+" do not use formatting or anything that cannot be spoken. "+text, ai_api_key))
 
+def phone_command(text):
+    #one message from the phone app, handled like something said after "navi"
+    if re.fullmatch(r"\W*(ok(ay)?\W*)?(goodbye|bye|good night)\W*", text.lower()): #nothing to put to sleep on the pc
+        text_to_speech(random_message("goodbye"))
+        return
+    handle_command(text)
+
+def phone_speech(text, lang="en"):
+    #a reply as an mp3 in navi's voice, for the phone to play
+    import tempfile
+    fd, filename=tempfile.mkstemp(suffix=".mp3")
+    os.close(fd)
+    try:
+        make_speech(text, filename, lang)
+        with open(filename, "rb") as f:
+            return f.read()
+    finally:
+        os.remove(filename)
+
+def start_phone():
+    phone.start(phone.Hooks(run=phone_command, speech=phone_speech, post=gui_post, cancelled=StopListening,
+                            name=bot_name.capitalize(), font=UI_FONT))
+
 def assistant_loop():
     global navi
     while not stop_event.is_set():
@@ -6677,7 +6715,7 @@ class SettingsWindow:
         for name, build in (("Voice", self.voice_page), ("Voice training", self.training_page), ("Messages", self.messages_page),
                             ("Listening", self.listening_page),
                             ("Day briefing", self.briefing_page), ("Homework alerts", self.homework_page), ("Location", self.location_page),
-                            ("Phone alerts", self.phone_page), ("Music", self.music_page), ("Smart home", self.smart_home_page), ("Keys", self.keys_page), ("Calendar", self.calendar_page), ("Memory", self.memory_page),
+                            ("Phone alerts", self.phone_page), ("Music", self.music_page), ("Smart home", self.smart_home_page), ("Phone app", lambda: phone.settings_page(self)), ("Keys", self.keys_page), ("Calendar", self.calendar_page), ("Memory", self.memory_page),
                             ("Startup", self.startup_page), ("Updates", self.updates_page)):
             self.body=tk.Frame(stack, bg=c["bg"])
             self.body.grid(row=0, column=0, sticky="nsew")
@@ -7617,5 +7655,6 @@ elif test==3:
     start_day_briefings() #sums up email and canvas now, and again whenever the pc wakes from sleep
     start_everyday_tools() #reminders and timers go off on time
     start_updates() #auto-update, when it's turned on in settings
+    start_phone() #the phone app, if it's turned on in settings > phone app
     root.mainloop()
 

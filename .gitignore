@@ -10,6 +10,7 @@ venv/
 
 # Personal data, tokens and runtime state
 navi_settings.json
+navi_phones.json
 navi_memory.json
 ai_model_status.json
 navi_notes.json
