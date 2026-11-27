@@ -6379,10 +6379,11 @@ class MusicPanel:
             d.text((tx, cy-1*k), self.fit(d, i["artist"], self.small_font, room), font=self.small_font, fill=self.MUTED)
             #progress
             bar_l, bar_r, bar_y=tx, (self.W-28)*k, cy+19*k
-            d.rounded_rectangle((bar_l, bar_y, bar_r, bar_y+3*k), radius=2*k, fill=(58,60,74))
-            filled=bar_l+(bar_r-bar_l)*self.progress()
-            if filled>bar_l+2*k:
-                d.rounded_rectangle((bar_l, bar_y, filled, bar_y+3*k), radius=2*k, fill=self.ACCENT)
+            if i["duration"]: #the spotify app on this pc (no premium) doesn't say how far into the song it is
+                d.rounded_rectangle((bar_l, bar_y, bar_r, bar_y+3*k), radius=2*k, fill=(58,60,74))
+                filled=bar_l+(bar_r-bar_l)*self.progress()
+                if filled>bar_l+2*k:
+                    d.rounded_rectangle((bar_l, bar_y, filled, bar_y+3*k), radius=2*k, fill=self.ACCENT)
             def lit(name):
                 return self.TEXT if self.hover==name else self.MUTED
             iy=cy-4*k
@@ -7355,9 +7356,9 @@ class SettingsWindow:
         if not self.win.winfo_exists():
             return
         if not music.client_id():
-            text="Not set up yet: add your Spotify client ID on the Keys page."
+            text="Using the Spotify app on this PC (no Premium setup): I can tell what's playing, pause, skip and go back."
         elif music.connected() and music.problem:
-            text=music.problem
+            text=music.problem+" Until then I use the Spotify app on this PC."
         elif music.connected():
             text="Connected to Spotify."
         elif music.signing_in.locked():

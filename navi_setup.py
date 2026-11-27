@@ -184,6 +184,15 @@ PAGES = [
                "Paste the token below. Then say \"Navi, set up Discord\" to add the bot to your server."],
      "links": [("Discord developer portal", "https://discord.com/developers/applications")],
      "fields": [("DISCORD_BOT_TOKEN", "Discord bot token", True, _discord_token)]},
+    {"title": "Songs on YouTube (Google)", "optional": True,
+     "about": "Lets Navi play any song by name on YouTube for free (\"play Blinding Lights\"), which helps when you "
+              "don't have Spotify Premium. Free for about 100 songs a day.",
+     "steps": ["In Google Cloud make a project and turn on the YouTube Data API v3 (first link).",
+               "Under Credentials press Create credentials > API key (second link). Optionally restrict it to the YouTube Data API v3.",
+               "Copy the key (starts with AIza) and paste it below."],
+     "links": [("Turn on the YouTube API", "https://console.cloud.google.com/apis/library/youtube.googleapis.com"),
+               ("Make the API key", "https://console.cloud.google.com/apis/credentials")],
+     "fields": [("YOUTUBE_API_KEY", "YouTube API key", True, _prefix("AIza", name="Google API key"))]},
     {"title": "Calendar (Google)", "optional": True,
      "about": "Lets Navi read and add events in Google Calendar. This one is a file instead of a key, and it takes a "
               "few minutes in Google Cloud. You can also skip it and drop the file in Navi's folder later.",
@@ -196,7 +205,7 @@ PAGES = [
 ]
 ENV_ORDER = ["GROQ_API_KEY", "GEMINI_API_KEY", "OPENROUTER_API_KEY", "MAIL_USER", "MAIL_PASSWORD", "IMAP_SERVER",
              "IMAP_PORT", "CANVAS_URL", "CANVAS_API_KEY", "GEOAPIFY_API_KEY", "TPLINK_USER", "TPLINK_PASSWORD", "HA_URL", "HA_TOKEN", "HUE_BRIDGE", "HUE_KEY", "HF_TOKEN",
-             "SPOTIFY_CLIENT_ID", "DISCORD_BOT_TOKEN"]
+             "SPOTIFY_CLIENT_ID", "DISCORD_BOT_TOKEN", "YOUTUBE_API_KEY"]
 ENV_DEFAULTS = {"IMAP_SERVER": "imap.gmail.com", "IMAP_PORT": "993"}
 
 

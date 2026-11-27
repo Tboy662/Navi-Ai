@@ -91,6 +91,8 @@ requests.post=fake.token
 music.requests.request=fake.request
 music.requests.post=fake.token
 music.time.sleep=lambda s: None
+real_titles=music.spotify_titles
+music.spotify_titles=lambda: [] #the real spotify app on this pc mustn't change the results
 
 #--- sign in -----------------------------------------------------------------------------------------------------
 def browser(code="CODE", state=None, path="/callback", tamper=None):
@@ -217,25 +219,76 @@ run("next song")
 check("...and only explains once", keys==["next"] and said==[])
 opened.clear()
 run("play blinding lights by the weeknd")
-check("play opens the song search in the web player", opened==[music.WEB_PLAYER+"/search/blinding%20lights%20the%20weeknd"] and "Press play there" in said[-1])
+check("play opens the song search in spotify", opened and opened[0] in ("spotify:search:blinding%20lights%20the%20weeknd",
+      music.WEB_PLAYER+"/search/blinding%20lights%20the%20weeknd") and "Press play there" in said[-1])
+music.spotify_titles=lambda: ["The Weeknd - Blinding Lights"]
 run("what's playing")
-check("what's playing explains the block", "doesn't have Premium" in said[-1])
+check("what's playing reads the spotify app instead", said==["This is Blinding Lights by The Weeknd."])
+music.spotify_titles=lambda: []
 said.clear()
 real_sign_in=music.sign_in
 music.sign_in=lambda open_url, wait=300: "ok" #the sign-in itself is tested above
 check("connect reports the block after signing in", music.finish_connect(ctx)=="owner_premium" and "signed in, but" in said[-1])
 music.sign_in=real_sign_in
 fake.reset()
-run("pause")
-check("the reason clears once spotify answers again", music.problem=="")
+music.playback() #the watcher asks spotify again every 10 minutes
+check("the reason clears once spotify answers again", music.problem=="" and music.api_usable())
 
 #not connected: media keys for the basics, setup help for the rest
 music.forget_token()
 check("not connected: pause uses the media key", run("pause") and keys==["play_pause"])
 os.environ["SPOTIFY_CLIENT_ID"]=""
-check("not set up: play explains how", run("play hello by adele") and "Keys" in said[-1])
+opened.clear()
+check("not set up, no youtube key: play opens spotify's search", run("play hello by adele") and opened and "hello%20adele" in opened[0] and "YouTube key" in said[-1])
+check("not set up: shuffle explains the limits", run("shuffle") and said[-1]==music.NO_PREMIUM_LIMITS)
 check("not set up: what's playing goes to the ai", not run("what's playing"))
 check("not music: left alone", not run("repeat that") and not run("what time is it"))
+
+#--- the spotify app on this pc (no premium) ------------------------------------------------------------------------
+music.spotify_titles=lambda: ["Daft Punk - One More Time", "Spotify Free"]
+info=music.local_now_playing()
+check("song read from the app's window title", info["title"]=="One More Time" and info["artist"]=="Daft Punk" and info["playing"] and info["source"]=="local")
+music.spotify_titles=lambda: ["Spotify Free"]
+check("paused keeps the last song, not playing", music.local_now_playing(info)["title"]=="One More Time" and not music.local_now_playing(info)["playing"])
+check("paused with nothing known shows nothing", music.local_now_playing(None) is None)
+music.spotify_titles=lambda: []
+check("app closed: nothing", music.local_now_playing(info) is None)
+check("real window scan runs without error", isinstance(real_titles(), list))
+keys.clear()
+music.control("next", ctx)
+check("orb buttons use the media keys without the api", keys==["next"])
+
+#--- youtube -------------------------------------------------------------------------------------------------------
+yt=[]
+def fake_get(url, params=None, headers=None, timeout=None, allow_redirects=True, **kw):
+    yt.append((url, params, headers))
+    if headers.get("X-Goog-Api-Key")=="AIzaBADBADBADBADBADBADBADBADBADBADBAD":
+        return Resp(400, {"error": {"errors": [{"reason": "badRequest"}]}})
+    if params["q"]=="quota":
+        return Resp(403, {"error": {"errors": [{"reason": "quotaExceeded"}]}})
+    if params["q"]=="weird":
+        return Resp(200, {"items": [{"id": {"videoId": "../../evil?x=1"}}, {"id": {"videoId": "dQw4w9WgXcQ"}, "snippet": {"title": "Ok &amp; fine"}}]})
+    return Resp(200, {"items": [{"id": {"videoId": "4NRXx6U8ABQ"}, "snippet": {"title": "The Weeknd - Blinding Lights (Official Audio)", "channelTitle": "TheWeekndVEVO"}}]})
+music.requests.get=fake_get
+os.environ["YOUTUBE_API_KEY"]="AIzaSyA0123456789abcdefghijklmnopqrstuv"
+opened.clear(); said.clear()
+check("play X on youtube", run("play blinding lights on youtube") and opened==["https://www.youtube.com/watch?v=4NRXx6U8ABQ"] and said[-1].startswith("Playing The Weeknd"))
+check("youtube key goes in a header, never the url", "key" not in yt[-1][1] and yt[-1][2]["X-Goog-Api-Key"].startswith("AIza") and yt[-1][0]==music.YOUTUBE_SEARCH)
+opened.clear()
+check("without premium, plain play uses youtube when there's a key", run("play blinding lights by the weeknd") and opened[-1].startswith("https://www.youtube.com/watch?v="))
+opened.clear()
+check("...but play X on spotify still opens spotify", run("play blinding lights on spotify") and opened and "youtube" not in opened[-1])
+opened.clear()
+run("play weird on youtube")
+check("bad video ids are skipped, titles unescaped", opened==["https://www.youtube.com/watch?v=dQw4w9WgXcQ"] and said[-1]=="Playing Ok & fine on YouTube.")
+run("play quota on youtube")
+check("quota used up is explained", "daily limit" in said[-1])
+os.environ["YOUTUBE_API_KEY"]="AIzaBADBADBADBADBADBADBADBADBADBADBAD"
+run("play hello on youtube")
+check("bad key is explained", "didn't accept the API key" in said[-1])
+os.environ["YOUTUBE_API_KEY"]="not a key&q=x"
+check("a malformed key is never sent", music.youtube_key()=="" and run("play hello on youtube") and "add a YouTube API key" in said[-1])
+os.environ["YOUTUBE_API_KEY"]=""
 
 #--- album art -----------------------------------------------------------------------------------------------------
 check("art from spotify's image server", music.art_url_ok("https://i.scdn.co/image/ab67616d0000b273"))

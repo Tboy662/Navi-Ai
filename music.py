@@ -382,6 +382,172 @@ def now_playing_info(state):
             "duration": int(item.get("duration_ms") or 0), "device": clean((state.get("device") or {}).get("name"), 60),
             "shuffle": bool(state.get("shuffle_state")), "repeat": clean(state.get("repeat_state"), 10), "at": time.monotonic()}
 
+#without premium: the spotify app on this pc. Its window title is "Artist - Song" while a song plays and "Spotify
+#Free" (or similar) while paused, so navi reads the song from there and uses the keyboard's media keys to control it
+IDLE_TITLES={"", "spotify", "spotify free", "spotify premium"}
+
+def spotify_titles():
+    #titles of the spotify app's windows on this pc ([] if it isn't running, or not on windows)
+    if os.name!="nt":
+        return []
+    import ctypes
+    from ctypes import wintypes
+    user32=ctypes.WinDLL("user32") #its own copy, so voice.py's argtypes on windll.user32 aren't touched
+    kernel32=ctypes.WinDLL("kernel32")
+    kernel32.OpenProcess.restype=wintypes.HANDLE
+    kernel32.OpenProcess.argtypes=[wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    kernel32.QueryFullProcessImageNameW.argtypes=[wintypes.HANDLE, wintypes.DWORD, wintypes.LPWSTR, ctypes.POINTER(wintypes.DWORD)]
+    kernel32.CloseHandle.argtypes=[wintypes.HANDLE]
+    user32.GetWindowTextLengthW.argtypes=[wintypes.HWND]
+    user32.GetWindowTextW.argtypes=[wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
+    user32.GetClassNameW.argtypes=[wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
+    user32.GetWindowThreadProcessId.argtypes=[wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]
+    names={}
+    def exe(pid):
+        if pid not in names:
+            names[pid]=""
+            h=kernel32.OpenProcess(0x1000, False, pid) #PROCESS_QUERY_LIMITED_INFORMATION: only its name
+            if h:
+                buf=ctypes.create_unicode_buffer(520)
+                size=wintypes.DWORD(520)
+                if kernel32.QueryFullProcessImageNameW(h, 0, buf, ctypes.byref(size)):
+                    names[pid]=os.path.basename(buf.value).lower()
+                kernel32.CloseHandle(h)
+        return names[pid]
+    titles=[]
+    @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+    def each(hwnd, _):
+        n=user32.GetWindowTextLengthW(hwnd)
+        if 0<n<=500:
+            cls=ctypes.create_unicode_buffer(64)
+            user32.GetClassNameW(hwnd, cls, 64)
+            if cls.value.startswith("Chrome_WidgetWin"): #spotify's main window (its other windows are helpers)
+                pid=wintypes.DWORD()
+                user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+                if exe(pid.value)=="spotify.exe":
+                    buf=ctypes.create_unicode_buffer(n+1)
+                    user32.GetWindowTextW(hwnd, buf, n+1)
+                    titles.append(buf.value)
+        return True
+    user32.EnumWindows(each, 0)
+    return titles
+
+def local_now_playing(last=None):
+    #the song in the spotify app on this pc, or None. last: what was shown before, kept while it's paused
+    titles=spotify_titles()
+    if not titles:
+        return None
+    song=next((t for t in titles if t.strip().lower() not in IDLE_TITLES and " - " in t), None)
+    if song is None: #the app is open but paused
+        if last and last.get("source")=="local":
+            return dict(last, playing=False, at=time.monotonic())
+        return None
+    artist, title=song.split(" - ", 1)
+    return {"title": clean(title), "artist": clean(artist), "art": "", "id": clean(song, 200), "type": "track", "playing": True,
+            "progress": 0, "duration": 0, "device": "this PC", "shuffle": False, "repeat": "", "at": time.monotonic(), "source": "local"}
+
+def api_usable():
+    #spotify's web api works for you: connected, and not refused for lack of premium
+    return connected() and problem_reason!="OWNER_PREMIUM"
+
+#youtube: plays a song by name, free. Needs a youtube data api key (google cloud), which only goes to googleapis.com
+YOUTUBE_SEARCH="https://www.googleapis.com/youtube/v3/search"
+VIDEO_ID_RE=re.compile(r"^[A-Za-z0-9_-]{11}$")
+
+def youtube_key():
+    value=os.environ.get("YOUTUBE_API_KEY", "").strip()
+    return value if re.fullmatch(r"[A-Za-z0-9_-]{30,60}", value) else ""
+
+def youtube_find(query):
+    #(video id, title, channel) of the best music video for what you said, or None. The key is sent in a header, so it's
+    #never part of a url that could end up in an error message
+    import html as html_text
+    for extra in ({"videoCategoryId": "10"}, {}): #music first, then anything
+        r=requests.get(YOUTUBE_SEARCH, params=dict({"part": "snippet", "type": "video", "maxResults": 1, "q": query[:200]}, **extra),
+                       headers={"X-Goog-Api-Key": youtube_key()}, timeout=TIMEOUT, allow_redirects=False)
+        if r.status_code!=200:
+            try:
+                reason=str(((r.json().get("error") or {}).get("errors") or [{}])[0].get("reason", ""))
+            except (ValueError, AttributeError, IndexError):
+                reason=""
+            raise SpotifyError(r.status_code, "YOUTUBE_"+reason)
+        for item in (r.json() or {}).get("items", []):
+            vid=str((item.get("id") or {}).get("videoId", ""))
+            if VIDEO_ID_RE.match(vid):
+                s=item.get("snippet") or {}
+                return vid, clean(html_text.unescape(str(s.get("title", "")))), clean(html_text.unescape(str(s.get("channelTitle", ""))))
+    return None
+
+def play_youtube(query, ctx):
+    if not youtube_key():
+        ctx.say("To play songs on YouTube, add a YouTube API key in Settings, then Keys. It's free, and the Keys page has a Get button.")
+        return
+    try:
+        found=youtube_find(query)
+    except SpotifyError as e:
+        if "quota" in e.reason.lower() or "limit" in e.reason.lower():
+            ctx.say("YouTube's free daily limit for searches is used up. It resets tomorrow.")
+        elif e.status in (400, 403):
+            ctx.say("YouTube didn't accept the API key. Check it in Settings, then Keys.")
+        else:
+            ctx.say("YouTube had a problem with that. Try again in a moment.")
+        return
+    except requests.RequestException:
+        ctx.say("I couldn't reach YouTube. Check your internet connection.")
+        return
+    if not found:
+        ctx.say(f"I couldn't find {query} on YouTube.")
+        return
+    vid, title, channel=found
+    ctx.open_url("https://www.youtube.com/watch?v="+vid)
+    ctx.say(f"Playing {title} on YouTube.")
+
+def open_spotify_search(query, ctx):
+    #the spotify app's search (or the web player's, without the app), so you can press play
+    q=urllib.parse.quote(query[:100], safe="")
+    app=False
+    if os.name=="nt":
+        try:
+            import winreg
+            winreg.CloseKey(winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Classes\spotify"))
+            app=True
+        except OSError:
+            app=False
+    ctx.open_url("spotify:search:"+q if app else WEB_PLAYER+"/search/"+q)
+
+NO_PREMIUM_LIMITS="Without Spotify Premium I can only pause, skip, go back and tell you what's playing in the Spotify app on this PC."
+
+def local_handle(action, arg, t, ctx):
+    #every request when spotify's web api isn't usable: the spotify app on this pc, media keys and youtube
+    if action=="pause" and "pause" not in t:
+        return False #"stop" on its own isn't worth pressing play/pause for (it would start music if none was playing)
+    if action in ("pause", "resume", "next", "previous"):
+        ctx.media_key({"pause": "play_pause", "resume": "play_pause"}.get(action, action))
+        if watcher is not None:
+            poke()
+        return True
+    if action=="what":
+        info=local_now_playing(watcher.last if watcher is not None else None)
+        if info:
+            ctx.say(("This is " if info["playing"] else "Paused on ")+info["title"]+(f" by {info['artist']}" if info["artist"] else "")+".")
+        elif spotify_titles():
+            ctx.say("Spotify is open, but nothing is playing.")
+        else:
+            return False #maybe it's playing somewhere else: let the ai answer
+        return True
+    if action in ("play", "queue", "shuffle_play") and arg:
+        kind, name, artist=parse_request(arg)
+        query=" ".join(w for w in (name, artist) if w).strip() or arg
+        if youtube_key() and "spotify" not in t:
+            play_youtube(query, ctx)
+        else:
+            open_spotify_search(query, ctx)
+            ctx.say(f"I opened the search for {query} in Spotify. Press play there."+("" if youtube_key() else
+                    " Add a YouTube key in Settings, then Keys, and I can play songs by name on YouTube."))
+        return True
+    ctx.say(NO_PREMIUM_LIMITS)
+    return True
+
 class Watcher(threading.Thread):
     #asks spotify what's playing every few seconds (only while you're connected) and posts it to the gui
     def __init__(self, ctx):
@@ -389,6 +555,7 @@ class Watcher(threading.Thread):
         self.ctx=ctx
         self.wake=threading.Event()
         self.last=None
+        self.api_retry=0 #after spotify refuses the app, its api is asked again only every 10 minutes
 
     def refresh(self):
         self.wake.set()
@@ -396,16 +563,27 @@ class Watcher(threading.Thread):
     def run(self):
         while True:
             info=None
-            wait=5
-            if connected():
+            wait=2
+            used_api=False
+            if connected() and time.time()>=self.api_retry:
                 try:
                     info=now_playing_info(playback())
                     wait=3 if info and info["playing"] else 6
+                    used_api=True
                 except NotConnected:
                     pass
-                except (SpotifyError, requests.RequestException, ValueError) as e:
-                    wait=600 if getattr(e, "status", 0)==403 else 15 #a refused app stays refused for a while: don't keep asking
-                    info=self.last if isinstance(e, requests.RequestException) else None #keep showing it through a network blip
+                except requests.RequestException:
+                    info, wait, used_api=self.last, 15, True #keep showing it through a network blip
+                except (SpotifyError, ValueError) as e:
+                    if getattr(e, "status", 0)==403: #a refused app stays refused for a while: don't keep asking
+                        self.api_retry=time.time()+600
+                    else:
+                        wait, used_api=15, True
+            if not used_api:
+                try:
+                    info=local_now_playing(self.last)
+                except OSError:
+                    info=None
             key=None if info is None else (info["id"], info["playing"], info["title"], info["shuffle"], info["repeat"], info["progress"]//4000)
             if key!=(None if self.last is None else self.last.get("_key")):
                 if info is not None:
@@ -463,6 +641,9 @@ def command(t):
                  r"\bwho (?:sings|is singing|sang|made) (?:this|that)\b|\bname (?:of )?(?:this|the|that) song\b|\bwhat am i listening to\b|"
                  r"\bwhat(?:'s| is) (?:currently |now )playing\b", t):
         return "what", None
+    m=re.match(r"^(?:play|put on|throw on|blast|queue up|queue)\s+(.+?)\s+(?:on|from|in|using) (?:youtube|you tube)$", t)
+    if m:
+        return "youtube", m.group(1)
     if re.search(NOT_MUSIC, t):
         return None, None
     if re.search(r"^(?:(?:like|save|love|heart)(?: this| the| that)?(?: song| track)?|add (?:this|the|that) (?:song|track) to my (?:liked songs|library|favorites)|"
@@ -647,24 +828,11 @@ def say_error(ctx, e):
 def premium_refusal(e):
     return isinstance(e, SpotifyError) and e.status==403 and ("PREMIUM" in e.reason.upper() or "premium" in e.message.lower())
 
-def without_api(action, arg, ctx, e):
-    #spotify refuses navi (no premium): the keyboard's media keys still control the spotify app (or anything playing),
-    #and a song can be looked up in the spotify web player, where you press play yourself. True if that covered it
-    if action in ("pause", "resume", "next", "previous"):
-        ctx.media_key({"pause": "play_pause", "resume": "play_pause"}.get(action, action))
-    elif action in ("play", "queue", "shuffle_play") and arg:
-        kind, name, artist=parse_request(arg)
-        query=" ".join(w for w in (name, artist) if w).strip()
-        if not query:
-            return False
-        ctx.open_url(WEB_PLAYER+"/search/"+urllib.parse.quote(query[:100], safe=""))
-        ctx.say(f"Spotify won't let me pick songs, so I opened the search for {query} in Spotify. Press play there.")
-    else:
-        return False
-    if not getattr(ctx, "told_about_premium", False): #explain once, not on every pause and skip
+def explain_once(ctx, e):
+    #why spotify refused, said the first time only (not on every pause and skip)
+    if not getattr(ctx, "told_about_premium", False):
         ctx.told_about_premium=True
         say_error(ctx, e)
-    return True
 
 signing_in=threading.Lock()
 
@@ -719,21 +887,16 @@ def handle(text, ctx):
     if action=="connect":
         connect(ctx)
         return True
+    if action=="youtube":
+        play_youtube(arg, ctx)
+        return True
     if action=="disconnect":
         forget_token()
         ctx.say("Spotify is disconnected. You can also remove Navi from your Spotify account's apps page.")
         poke()
         return True
-    if not connected():
-        if action=="pause" and "pause" not in t:
-            return False #"stop" on its own isn't worth pressing play/pause for (it would start music if none was playing)
-        if action in ("pause", "resume", "next", "previous"): #the keyboard's media keys still work on whatever's playing
-            ctx.media_key({"pause": "play_pause", "resume": "play_pause"}.get(action, action))
-            return True
-        if action=="what" and not client_id():
-            return False #let the ai answer
-        ctx.say(SETUP_HELP if not client_id() else "Say connect Spotify first, and sign in.")
-        return True
+    if not api_usable(): #no premium (or not set up): the spotify app on this pc, media keys and youtube
+        return local_handle(action, arg, t, ctx)
     try:
         run(action, arg, ctx)
     except NoDevice:
@@ -742,7 +905,10 @@ def handle(text, ctx):
         else:
             ctx.say("Nothing is playing on Spotify right now.")
     except SpotifyError as e:
-        if not ((e.reason=="OWNER_PREMIUM" or premium_refusal(e)) and without_api(action, arg, ctx, e)):
+        if e.reason=="OWNER_PREMIUM" or premium_refusal(e):
+            explain_once(ctx, e)
+            local_handle(action, arg, t, ctx)
+        else:
             say_error(ctx, e)
     except (NotConnected, requests.RequestException) as e:
         say_error(ctx, e)
@@ -752,6 +918,10 @@ def handle(text, ctx):
 def control(action, ctx):
     #a press on the orb's music controls: "play_pause", "next" or "previous"
     _ctx_paths(ctx)
+    if not api_usable():
+        ctx.media_key(action)
+        poke()
+        return
     try:
         if action=="play_pause":
             state=playback() or {}
@@ -764,7 +934,9 @@ def control(action, ctx):
     except NoDevice:
         ctx.say("Nothing is playing on Spotify right now.")
     except SpotifyError as e:
-        if not (premium_refusal(e) and without_api({"play_pause": "pause"}.get(action, action), None, ctx, e)):
+        if e.reason=="OWNER_PREMIUM" or premium_refusal(e):
+            ctx.media_key(action)
+        else:
             say_error(ctx, e)
     except (NotConnected, requests.RequestException) as e:
         say_error(ctx, e)
