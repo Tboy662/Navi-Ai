@@ -123,6 +123,7 @@ It can also run when Navi starts and when the PC wakes from sleep (Settings > Da
 | "pause", "resume", "next song", "previous song" | Media keys. |
 | "brightness 50", "brightness up", "dim the screen" | **New.** Screen brightness, on laptops and screens that let Windows change it. |
 | "take a screenshot" | Saves one in Pictures\Screenshots. |
+| "what's on my screen", "explain this error", "what does this message mean", "read my screen", "explain this chart", "what am I looking at" | **New.** Navi takes a screenshot of the screen you're using and the AI answers out loud: what the app or page is, or what an error means and how to fix it. You can ask anything about it, like "what's the answer to the question on my screen". The picture is sent only to the AI and isn't saved. |
 | "lock my computer" | Locks the PC. |
 | "how's my battery", "how much memory", "disk space", "CPU usage", "how long has my computer been on", "system status" | **New.** Battery, memory, free disk space, processor load and uptime. |
 | "read my clipboard", "what's on my clipboard" | **New.** Reads what you copied (long text gets summed up). |

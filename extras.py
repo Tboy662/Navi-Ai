@@ -833,7 +833,7 @@ HELP=("I can do a lot. Say my name, then for example: weather, check my mail, dr
       "a pizza place near me, open Spotify, volume up, next song, take a screenshot, lock my computer. New ones: what time "
       "is it, what's 15 times 23, convert 5 miles to kilometers, flip a coin, roll a dice, start a stopwatch, start a focus "
       "timer, take a note, read my notes, how do you say thank you in Spanish, search YouTube for cat videos, how's my battery, "
-      "read my clipboard, close Chrome, brightness 50, restart my computer, and repeat that. There's also AI mode, study "
+      "read my clipboard, what's on my screen, explain this error, close Chrome, brightness 50, restart my computer, and repeat that. There's also AI mode, study "
       "mode, agent mode and Minecraft mode. Anything else, just ask and I'll answer.")
 
 def handle(text, ctx):
