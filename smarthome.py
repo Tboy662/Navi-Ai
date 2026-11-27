@@ -42,9 +42,10 @@ HA_DOMAINS={"light": "light", "switch": "plug", "fan": "fan", "scene": "scene"} 
 
 class Context:
     #what the commands need from voice.py, so this file can be tested on its own
-    def __init__(self, say, hidden=lambda: [], post=lambda kind, value: None, passthrough=(), env=None):
+    def __init__(self, say, hidden=lambda: [], post=lambda kind, value: None, passthrough=(), env=None, defaults=lambda: []):
         self.say=say
         self.hidden=hidden #device ids hidden in settings
+        self.defaults=defaults #device ids "the lights" means (settings > smart home); empty means every light
         self.post=post
         self.passthrough=passthrough
         self.env=env if env is not None else os.environ
@@ -348,9 +349,9 @@ class TPLink:
                 continue
             if d.children:
                 for child in d.children:
-                    out.append(self.device(f"{ip}/{child.device_id}", child))
+                    out.append(self.device(str(child.device_id), child))
             else:
-                out.append(self.device(ip, d))
+                out.append(self.device(str(d.device_id or ip), d)) #the device id stays the same when its address changes
         if lost:
             cls.found_at=0
         self.notes=[f"{locked} TP-Link Tapo device{'s need' if locked>1 else ' needs'} your TP-Link account on the "
@@ -375,15 +376,12 @@ class TPLink:
         return _Loop.run(self.load(), 25)
 
     def find(self, id):
-        ip, _, child=id.partition("/")
-        d=TPLink.found.get(ip)
-        if d is None:
-            raise HubError("That TP-Link device moved. Try again in a moment.")
-        if child:
-            d=next((c for c in d.children if c.device_id==child), None)
-            if d is None:
-                raise HubError("That TP-Link socket is gone.")
-        return d
+        for ip, d in TPLink.found.items():
+            for x in [d]+list(d.children or []):
+                if str(x.device_id or ip)==id:
+                    return x
+        TPLink.found_at=0 #look again next time
+        raise HubError("I couldn't find that TP-Link device on the network. Try again in a moment.")
 
     async def change(self, id, change):
         d=self.find(id)
@@ -646,6 +644,7 @@ def parse(text):
                 change["brightness"]=level
             change["name"]=cname
     target=(target or "").strip()
+    every=bool(re.match(r"(?:the\s+)?(?:all|every|everything)\b", target)) #"all the lights" skips the default lights
     while True:
         cut=re.sub(r"^(?:the|my|all|of|every|everything in|any)\s+", "", target)
         if cut==target:
@@ -658,12 +657,12 @@ def parse(text):
             return {"action": "error", "say": "Brightness can be 0 to 100 percent."}
         if change["brightness"]==0:
             change={"on": False}
-    return {"action": "set", "target": target, "change": change, "delay": delay}
+    return {"action": "set", "target": target, "change": change, "delay": delay, "every": every}
 
 def kind_of_word(w):
     return KIND_WORDS.get(w) or KIND_WORDS.get(w+"s")
 
-def match(target, devices, kinds=None):
+def match(target, devices, kinds=None, defaults=None, every=False):
     #the devices the words point at. Only "lights", "all the lights" or "everything" mean every light; any other
     #word has to be in a device's name, so "the front door" never turns into every light
     words=[w for w in words_of(target) if w not in STOP]
@@ -680,9 +679,12 @@ def match(target, devices, kinds=None):
         if names=={"everything"} and want is None:
             return [d for d in pool if d.kind in ("light", "plug", "fan")]
         if want in (None, "light"):
-            single=re.search(r"\b(lamp|light|bulb)\b", target) and not re.search(r"\b(all|every|everything)\b", target)
+            single=None if every or re.search(r"\b(all|every|everything)\b", target) else re.search(r"\b(lamp|light|bulb)\b", target)
             named=[d for d in pool if d.kind=="light" and single.group(1) in words_of(d.name)] if single else []
-            return named or [d for d in pool if d.kind=="light"] #"the lamp" is the desk lamp, "the lights" are all
+            if named:
+                return named #"the lamp" is the desk lamp
+            chosen=[d for d in pool if d.key in set(defaults or ())]
+            return chosen or [d for d in pool if d.kind=="light"] #"the lights" are the ones picked in settings, or all
         return [d for d in pool if d.kind==want]
     scored=[]
     for d in pool:
@@ -837,7 +839,7 @@ def run(text, ctx):
         req={"action": "scene", "target": re.sub(r"\s*\bscenes?\b\s*", " ", req["target"]).strip(), "delay": req.get("delay")}
         return scene(req, devices, problems, t, explicit, ctx)
     kinds={"plug", "fan", "light", "room"} if "rgb" not in req["change"] and "kelvin" not in req["change"] else {"light", "room"}
-    hits=match(req["target"], devices, kinds)
+    hits=match(req["target"], devices, kinds, defaults=None if req.get("every") else ctx.defaults(), every=req.get("every", False))
     if "step" in req["change"] or "brightness" in req["change"]:
         hits=[d for d in hits if d.kind in ("light", "room")] or hits
     if set(kinds)=={"light", "room"}:

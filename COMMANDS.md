@@ -121,7 +121,7 @@ TP-Link Kasa lights, switches and plugs on your Wi-Fi work with no setup. Tapo d
 
 | Say | What happens |
 | --- | --- |
-| "turn on the kitchen light", "turn the desk lamp off", "lights off", "turn off all the lights", "kill the lights", "toggle the living room" | Turns lights on or off. "The lights" means every light; anything else has to be in a device's name. |
+| "turn on the kitchen light", "turn the desk lamp off", "lights off", "turn off all the lights", "kill the lights", "toggle the living room" | Turns lights on or off. "The lights" means the lights you picked in Settings > Smart home (every light until you pick some), "all the lights" always means every light, and anything else has to be in a device's name. |
 | "turn on the fan plug", "switch off the heater plug", "turn on the bedroom fan" | Plugs, switches and fans. |
 | "dim the bedroom", "dim the bedroom to 30 percent", "living room lights to 50%", "make the lights brighter", "set the kitchen to full brightness" | Brightness (0 percent turns it off). |
 | "make the living room blue", "turn the lights red", "set the desk lamp to warm white", "make the lights cool" | Colors, and warm, neutral, cool or daylight white. |
@@ -249,7 +249,7 @@ When the same channel name is in two servers, Navi asks which one ("the first on
 - **Listening**: offline wake word, saying "stop" to interrupt, only wake for my voice.
 - **Keys**: every API key, including the Discord bot token, saved to `.env` and used straight away.
 - **Location**: your city or exact address, Celsius or Fahrenheit, and food filters.
-- **Smart home**: find TP-Link devices, test Home Assistant, find and pair a Hue bridge, see your devices and hide any Navi should leave alone.
+- **Smart home**: find TP-Link devices, pick which lights "lights on" and "lights off" use, test Home Assistant, find and pair a Hue bridge, see your devices and hide any Navi should leave alone.
 - **Phone app**: use Navi from your phone (see below).
 - **Phone alerts**: reminders and briefings on your phone through the free ntfy app (always, only when you're away, or never). **New:** a Texts section to hear when a new text comes in, and to have it read out.
 - **Calendar**: connect or disconnect Google Calendar.
