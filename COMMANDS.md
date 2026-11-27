@@ -121,7 +121,7 @@ It can also run when Navi starts and when the PC wakes from sleep (Settings > Da
 | "open Spotify", "launch Minecraft", "open YouTube", "open github.com" | Opens any app in the Start menu, or a website. |
 | "close Chrome", "close Notepad", "quit Spotify" | **New.** Closes the app's windows after you say yes. It's the same as clicking the X, so the app still asks about unsaved work. Navi never closes itself this way. |
 | "volume up", "volume down", "set the volume to 40", "mute" | Volume. |
-| "pause", "resume", "next song", "previous song" | Media keys. |
+| "pause", "resume", "next song", "previous song" | Media keys, when Spotify isn't connected (see Music below). |
 | "brightness 50", "brightness up", "dim the screen" | **New.** Screen brightness, on laptops and screens that let Windows change it. |
 | "take a screenshot" | Saves one in Pictures\Screenshots. |
 | "lock my computer" | Locks the PC. |
@@ -130,6 +130,28 @@ It can also run when Navi starts and when the PC wakes from sleep (Settings > Da
 | "summarize my clipboard", "explain my clipboard", "translate my clipboard to French" | **New.** The AI sums up, explains or translates what you copied. |
 | "shut down my computer", "restart my PC", "put my computer to sleep" | **New.** Asks first. Shut down and restart wait one minute so you can still stop them. |
 | "cancel the shutdown" | **New.** Stops a pending shut down or restart. |
+
+## Music (Spotify) (New)
+
+Navi controls Spotify on any of your devices (this PC, your phone, a speaker, the web player), so the Spotify app doesn't have to be open on this PC. Set it up once: add a Spotify client ID in Settings > Keys (Settings > Music shows how to make one), then say "connect Spotify" and sign in in your browser. Playing, pausing and skipping need Spotify Premium; that's Spotify's rule.
+
+| Say | What happens |
+| --- | --- |
+| "play Blinding Lights", "play Blinding Lights by The Weeknd", "play Taylor Swift", "play some jazz" | Finds it and plays it. A song plays on in its album; an artist or a genre plays a mix or playlist. |
+| "play the album Thriller", "play my chill playlist", "play my liked songs", "play the podcast ..." | Albums, your playlists, liked songs and podcasts. |
+| "pause", "stop the music", "resume", "play music", "next song", "skip", "previous song" | The basics. |
+| "what's playing", "what song is this", "who sings this" | Tells you the song and artist. |
+| "like this song" | Saves it to your liked songs. |
+| "shuffle", "turn off shuffle", "shuffle my liked songs", "repeat this song", "turn off repeat" | Shuffle and repeat. |
+| "spotify volume 40", "turn the music down" | Spotify's own volume (plain "volume up" is still the PC's volume). |
+| "restart this song", "skip ahead 30 seconds", "go back 10 seconds" | Moves within the song. |
+| "queue up Hello by Adele", "add Hello to the queue" | Adds a song to the queue. |
+| "play the music on my phone", "switch to the kitchen speaker", "Spotify devices" | Moves the music to another device, or lists them. |
+| "connect Spotify", "disconnect Spotify" | Signs in or out. |
+
+If nothing is playing anywhere, Navi moves playback to one of your devices that's on. If none are on, it opens the Spotify web player and starts there.
+
+While music plays, the orb grows a bar to its left with the song, the album art, a progress line and previous / play-pause / next buttons. It tucks back in 20 seconds after you pause. Turn it off in Settings > Music.
 
 ## AI modes
 
@@ -158,6 +180,7 @@ It can also run when Navi starts and when the PC wakes from sleep (Settings > Da
 - **Location**: your city or exact address, Celsius or Fahrenheit, and food filters.
 - **Phone alerts**: reminders and briefings on your phone through the free ntfy app (always, only when you're away, or never).
 - **Calendar**: connect or disconnect Google Calendar.
+- **Music**: connect or disconnect Spotify, the address to give Spotify when you make the app, and whether the orb shows what's playing.
 - **Memory**: see, add and forget what Navi remembers.
 - **Messages**: edit Navi's greetings, goodbyes and other lines, or have the AI write new ones in a style you pick.
 
@@ -173,5 +196,6 @@ These are the rules the features follow, and what was tested before this update 
 - **Notes** are saved to one fixed file; nothing you say becomes a file path. Notes are capped at 1000 characters and 500 notes, and a damaged notes file is ignored instead of crashing Navi.
 - **Closing apps** only sends the normal close message (like clicking X), skips Navi's own windows and the taskbar and desktop, and refuses vague targets like "close it" or "close everything".
 - **Private files stay out of git**: `.env`, settings, memory, notes, lists, reminders and Google sign-in files (`google_token.json`, `client_secret*.json`) are all in `.gitignore`.
+- **Spotify** sign-in happens on Spotify's own page with PKCE, so Navi never sees your password and has no client secret to leak. The answer comes back to a small server on `127.0.0.1` only (not reachable from your network), on one path, once, and only with the random code Navi made for that sign-in; tested with forged and malformed callbacks, which are refused. The token is kept in `spotify_token.json` (in `.gitignore`, never put in the installer, never printed). Navi only talks to `accounts.spotify.com` and `api.spotify.com`, what you say only goes into a search query, song ids from Spotify are checked before use, and album art only comes over https from Spotify's image servers (no redirects, 2 MB at most). Tests: `tests/test_music_commands.py` and `tests/test_music_spotify.py` (about 130 checks with a fake Spotify).
 
 Tests for the new commands (about 80 checks, including the attacks above) were run against `extras.py` before committing.

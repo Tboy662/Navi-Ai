@@ -51,6 +51,7 @@ import python_weather
 import threading
 import sounds #soft thinking / mode switch cues
 import extras #time, calculator, conversions, notes, translate, web search, system status, power and more
+import music #spotify: play, pause, skip and what's playing, on any of your spotify devices
 from imap_tools import MailBox
 from email.header import decode_header
 import requests
@@ -645,7 +646,7 @@ DEFAULT_SETTINGS={"voice": "google:com", "speed": 0, "pitch": 0, "volume": 100,
                   "city": "", "precise_location": True, "diet": [], "units": "C", "offline_wake": True, "voice_stop": True,
                   "phone_topic": "", "phone_when": "away", "phone_briefing": False,
                   "hw_alerts": True, "hw_alert_time": "16:00", "hw_lookahead": 24, "hw_before": 2,
-                  "only_my_voice": False, "voice_fixes": True, "hf_token": "", "last_voice": "google:com",
+                  "only_my_voice": False, "voice_fixes": True, "hf_token": "", "last_voice": "google:com", "music_panel": True,
                   "messages": {"greeting": enter_msg, "goodbye": exit_msg, "unclear": unclear_msg, "offline": offline_msg}}
 MESSAGE_KINDS={ #setting -> (name in the settings window, when navi says it, for the ai)
     "greeting": ("Greetings", "when it's woken up by its name"),
@@ -5695,6 +5696,7 @@ class VoiceTrainingWindow:
 def start_everyday_tools():
     threading.Thread(target=reminder_watcher, daemon=True).start()
     threading.Thread(target=homework_alert_watcher, daemon=True).start() #spoken heads-up for homework due soon
+    music.start(music_context) #what's playing on spotify, for the orb (only asks spotify once you've connected it)
     if settings["voice"]=="clone:mine" and TrainedVoice.ready(): #loads the trained voice now, so the first reply isn't slow
         threading.Thread(target=TrainedVoice.ask, args=({"cmd": "ping"},), daemon=True).start()
 
@@ -5703,6 +5705,9 @@ extras_context=extras.Context(say=lambda text, lang="en": text_to_speech(text, l
                               ai_text=lambda prompt: ai_text(prompt), add_timer=lambda seconds, what="": add_timer(seconds, what),
                               last_reply=lambda: last_spoken, data_path=lambda name: data_path(name), post=gui_post,
                               passthrough=(StopListening,))
+music_context=music.Context(say=lambda text: text_to_speech(text), hear=lambda: hear(), said_yes=lambda text: said_yes(text),
+                            data_path=lambda name: data_path(name), post=gui_post, open_url=webbrowser.open,
+                            media_key=lambda action: media_command({"next": "next", "previous": "previous"}.get(action, "pause")))
 
 def handle_command(text):
     global navi
@@ -5713,6 +5718,8 @@ def handle_command(text):
         gui_post("awake", False)
     elif re.search(r"\bhomework (alerts?|heads.?ups?|warnings?)\b", t):
         homework_alerts_command(t)
+    elif music.handle(text, music_context): #spotify (or the media keys if it isn't connected). Before extras so "repeat this song" is music
+        pass
     elif extras.handle(text, extras_context): #time, calculator, conversions, notes, translate, search, system, power...
         pass
     elif re.search(r"\bremember\b|\bforget\b|\bwhat do you know about me\b", t):
@@ -5963,6 +5970,286 @@ class NoOrb:
     def set_loud(self, loud):
         pass
 
+class MusicPanel:
+    #while music plays on spotify, the orb grows a pill to its left with the song, its album art and controls.
+    #drawn like the orb (per-pixel alpha on windows), so only the pill itself takes clicks; the rest stays click-through
+    W=330 #from the pill's left end to the orb's center
+    CAP=26 #the pill's round right end sits around the orb's center, so it looks like the orb stretching out
+    H=64
+    TOP=6 #room for the shadow
+    PAUSED_FOR=20 #seconds a paused song stays on screen
+    BG=(22,23,30)
+    TEXT=(236,236,242)
+    MUTED=(150,152,166)
+    ACCENT=(179,157,255)
+
+    def __init__(self, root, orb):
+        from PIL import ImageFont
+        self.root=root
+        self.orb=orb
+        self.win=tk.Toplevel(root)
+        self.win.overrideredirect(True)
+        self.win.attributes("-topmost", True)
+        self.width=self.W+self.CAP+8
+        cx=orb.x+orb.SIZE//2
+        self.x,self.y=cx-self.W, orb.y+(orb.SIZE-self.H)//2
+        self.win.geometry(f"{self.width}x{self.H}+{self.x}+{self.y}")
+        self.win.update_idletasks()
+        def font(names, size):
+            for name in names:
+                try:
+                    return ImageFont.truetype(name, size)
+                except OSError:
+                    pass
+            return ImageFont.load_default(size)
+        self.title_font=font(["segoeuisb.ttf", "seguisb.ttf", "segoeuib.ttf", "Helvetica.ttc", "Arial.ttf"], 26) #drawn at 2x, then shrunk
+        self.small_font=font(["segoeui.ttf", "Helvetica.ttc", "Arial.ttf"], 22)
+        self.info=None
+        self.open=0.0 #0 hidden .. 1 fully out
+        self.goal=0.0
+        self.art_url=None
+        self.art=None
+        self.hover=None
+        self.buttons={}
+        self.animating=False
+        if IS_WINDOWS:
+            self.setup_windows()
+        else:
+            from PIL import ImageTk
+            self.ImageTk=ImageTk
+            self.win.attributes("-transparent", True)
+            self.win.configure(bg="systemTransparent")
+            self.label=tk.Label(self.win, bg="systemTransparent", bd=0, highlightthickness=0)
+            self.label.pack()
+            self.photo=None
+        for w in (self.win,)+((self.label,) if not IS_WINDOWS else ()):
+            w.bind("<Button-1>", self.click)
+            w.bind("<Motion>", self.motion)
+            w.bind("<Leave>", lambda e: self.set_hover(None))
+        self.hide()
+        self.tick()
+
+    def hide(self):
+        #windows: an empty picture, so every pixel lets clicks through (withdrawing a layered tk window breaks its drawing)
+        if IS_WINDOWS:
+            self.show(np.zeros((self.H, self.width, 3), dtype=np.float32), np.zeros((self.H, self.width), dtype=np.float32))
+        else:
+            self.win.withdraw()
+
+    def setup_windows(self):
+        user32,gdi32=ctypes.windll.user32,ctypes.windll.gdi32
+        self.hwnd=int(self.win.wm_frame(),16)
+        ex=user32.GetWindowLongW(self.hwnd, -20)
+        user32.SetWindowLongW(self.hwnd, -20, ex|0x80000|0x80|0x08000000) #layered, no taskbar, never takes focus from your game or typing
+        bmi=BITMAPINFOHEADER(ctypes.sizeof(BITMAPINFOHEADER), self.width, -self.H, 1, 32, 0, 0, 0, 0, 0, 0)
+        self.bits=ctypes.c_void_p()
+        self.mem_dc=gdi32.CreateCompatibleDC(None)
+        bmp=gdi32.CreateDIBSection(self.mem_dc, ctypes.byref(bmi), 0, ctypes.byref(self.bits), None, 0)
+        gdi32.SelectObject(self.mem_dc, bmp)
+
+    def update(self, info):
+        #new now-playing info from the music watcher (None: nothing on spotify)
+        self.last_info=info
+        self.shown_setting=settings.get("music_panel", True)
+        if not self.shown_setting:
+            info=None
+        if info and not info.get("playing"):
+            old=self.info or {}
+            info["paused_at"]=old.get("paused_at") if old.get("id")==info.get("id") and old.get("paused_at") else time.monotonic()
+        self.info=info
+        show=bool(info) and (info["playing"] or time.monotonic()-info.get("paused_at", 0)<self.PAUSED_FOR)
+        self.goal=1.0 if show else 0.0
+        if info and info.get("art")!=self.art_url:
+            self.art_url=info.get("art")
+            self.art=None
+            threading.Thread(target=self.load_art, args=(self.art_url,), daemon=True).start()
+        self.start_animation()
+        self.render()
+        if show:
+            self.orb.win.lift()
+
+    def load_art(self, url):
+        data=music.fetch_art(url) if url else None
+        art=None
+        if data:
+            try:
+                img=Image.open(io.BytesIO(data))
+                if img.width*img.height<=4096*4096: #a normal cover, not a decompression bomb
+                    art=img.convert("RGB").resize((80,80), Image.LANCZOS)
+            except Exception:
+                art=None
+        def done():
+            if url==self.art_url:
+                self.art=art
+                self.render()
+        self.root.after(0, done)
+
+    def start_animation(self):
+        if not self.animating and self.open!=self.goal:
+            self.animating=True
+            if self.goal>0:
+                if not IS_WINDOWS:
+                    self.win.deiconify()
+                self.orb.win.lift() #the orb stays on top of the pill
+            self.animate()
+
+    def animate(self):
+        step=0.09 if self.goal>self.open else -0.12
+        self.open=max(0.0, min(1.0, self.open+step))
+        self.render()
+        if self.open!=self.goal:
+            self.win.after(16, self.animate)
+        else:
+            self.animating=False
+            if self.open==0:
+                self.hide()
+
+    def tick(self):
+        #moves the progress bar along, and hides a song that's been paused for a while
+        if settings.get("music_panel", True)!=getattr(self, "shown_setting", True): #turned on or off in settings
+            self.update(getattr(self, "last_info", None))
+        if self.info and self.open>0 and not self.animating:
+            if not self.info["playing"] and time.monotonic()-self.info.get("paused_at", 0)>=self.PAUSED_FOR:
+                self.goal=0.0
+                self.start_animation()
+            else:
+                self.render()
+        self.root.after(1000, self.tick)
+
+    def progress(self):
+        i=self.info
+        if not i or not i["duration"]:
+            return 0.0
+        done=i["progress"]+((time.monotonic()-i["at"])*1000 if i["playing"] else 0)
+        return max(0.0, min(1.0, done/i["duration"]))
+
+    def fit(self, draw, text, font, width):
+        if draw.textlength(text, font=font)<=width:
+            return text
+        while text and draw.textlength(text+"…", font=font)>width:
+            text=text[:-1]
+        return text.rstrip()+"…"
+
+    def render(self):
+        from PIL import ImageDraw, ImageFilter
+        if self.open<=0 and not self.animating:
+            return
+        k=2 #drawn at twice the size and shrunk, for smooth edges
+        W,H=self.width*k, self.H*k
+        ease=1-(1-self.open)**3
+        right=(self.W+self.CAP)*k #the pill's right end, around the orb's center
+        left=right-(self.CAP*2+(self.W-self.CAP)*ease)*k
+        top,bottom=self.TOP*k, (self.H-self.TOP)*k
+        shape=Image.new("L", (W,H), 0)
+        ImageDraw.Draw(shape).rounded_rectangle((left, top, right, bottom), radius=(bottom-top)//2, fill=255)
+        dropped=Image.new("L", (W,H), 0)
+        dropped.paste(shape, (0, 3*k))
+        shadow=dropped.filter(ImageFilter.GaussianBlur(8)).point(lambda v: v*0.45)
+        content=Image.new("RGBA", (W,H), self.BG+(242,))
+        d=ImageDraw.Draw(content)
+        self.buttons={}
+        i=self.info
+        if i:
+            x0=(self.W+self.CAP)*k-self.W*k #the content's left edge when the pill is all the way out
+            cy=self.H*k//2
+            #album art (or a note while it loads)
+            ax,ay,size=x0+12*k, cy-20*k, 40*k
+            if self.art is not None:
+                mask=Image.new("L", (size,size), 0)
+                ImageDraw.Draw(mask).rounded_rectangle((0,0,size-1,size-1), radius=8*k, fill=255)
+                content.paste(self.art.resize((size,size), Image.LANCZOS), (ax,ay), mask)
+            else:
+                d.rounded_rectangle((ax,ay,ax+size,ay+size), radius=8*k, fill=(44,46,58))
+                d.ellipse((ax+12*k, ay+22*k, ax+20*k, ay+29*k), fill=self.MUTED)
+                d.rectangle((ax+18*k, ay+10*k, ax+20*k, ay+26*k), fill=self.MUTED)
+                d.polygon([(ax+20*k, ay+10*k), (ax+28*k, ay+13*k), (ax+28*k, ay+16*k), (ax+20*k, ay+14*k)], fill=self.MUTED)
+            #controls, just left of the orb
+            prev_x, play_x, next_x=(self.W-102)*k, (self.W-72)*k, (self.W-42)*k
+            tx=ax+size+10*k
+            room=prev_x-16*k-tx
+            d.text((tx, cy-20*k), self.fit(d, i["title"] or "Unknown song", self.title_font, room), font=self.title_font, fill=self.TEXT)
+            d.text((tx, cy-1*k), self.fit(d, i["artist"], self.small_font, room), font=self.small_font, fill=self.MUTED)
+            #progress
+            bar_l, bar_r, bar_y=tx, (self.W-28)*k, cy+19*k
+            d.rounded_rectangle((bar_l, bar_y, bar_r, bar_y+3*k), radius=2*k, fill=(58,60,74))
+            filled=bar_l+(bar_r-bar_l)*self.progress()
+            if filled>bar_l+2*k:
+                d.rounded_rectangle((bar_l, bar_y, filled, bar_y+3*k), radius=2*k, fill=self.ACCENT)
+            def lit(name):
+                return self.TEXT if self.hover==name else self.MUTED
+            iy=cy-4*k
+            #previous: a bar and a triangle pointing left
+            c=lit("previous")
+            d.rectangle((prev_x-8*k, iy-7*k, prev_x-6*k, iy+7*k), fill=c)
+            d.polygon([(prev_x+7*k, iy-7*k), (prev_x+7*k, iy+7*k), (prev_x-5*k, iy)], fill=c)
+            #play / pause in a round button
+            r=(15 if self.hover=="play_pause" else 14)*k
+            d.ellipse((play_x-r, iy-r, play_x+r, iy+r), fill=self.TEXT)
+            if i["playing"]:
+                d.rectangle((play_x-5*k, iy-6*k, play_x-2*k, iy+6*k), fill=self.BG)
+                d.rectangle((play_x+2*k, iy-6*k, play_x+5*k, iy+6*k), fill=self.BG)
+            else:
+                d.polygon([(play_x-4*k, iy-7*k), (play_x-4*k, iy+7*k), (play_x+7*k, iy)], fill=self.BG)
+            #next: a triangle pointing right and a bar
+            c=lit("next")
+            d.polygon([(next_x-7*k, iy-7*k), (next_x-7*k, iy+7*k), (next_x+5*k, iy)], fill=c)
+            d.rectangle((next_x+6*k, iy-7*k, next_x+8*k, iy+7*k), fill=c)
+            for name, bx in (("previous", prev_x), ("play_pause", play_x), ("next", next_x)):
+                self.buttons[name]=((bx-15*k)//k, (iy-15*k)//k, (bx+15*k)//k, (iy+15*k)//k)
+            #content fades in once the pill is mostly out
+            fade=max(0.0, min(1.0, (ease-0.55)/0.45))
+            if fade<1:
+                content=Image.blend(Image.new("RGBA", (W,H), self.BG+(242,)), content, fade)
+        inside=np.asarray(shape, dtype=np.float32)/255
+        pill=inside*0.95
+        alpha=pill+np.asarray(shadow, dtype=np.float32)/255*(1-pill) #the shadow is black, so it only adds alpha
+        rgb=np.asarray(content.convert("RGB"), dtype=np.float32)/255*pill[...,None] #premultiplied
+        def half(a): #back to normal size: each pixel is the average of a 2x2 block
+            return a.reshape(self.H, k, self.width, k, *a.shape[2:]).mean(axis=(1,3))
+        self.show(half(rgb), half(alpha))
+
+    def show(self, rgb, alpha):
+        #rgb is premultiplied
+        if IS_WINDOWS:
+            bgra=np.dstack((rgb[...,2], rgb[...,1], rgb[...,0], alpha))
+            buf=(np.clip(bgra,0,1)*255).astype(np.uint8).tobytes()
+            ctypes.memmove(self.bits, buf, len(buf))
+            ctypes.windll.user32.UpdateLayeredWindow(self.hwnd, self.orb.screen_dc,
+                ctypes.byref(wintypes.POINT(self.x,self.y)), ctypes.byref(wintypes.SIZE(self.width,self.H)),
+                self.mem_dc, ctypes.byref(wintypes.POINT(0,0)), 0, ctypes.byref(self.orb.blend), 2)
+        else:
+            straight=rgb/np.maximum(alpha, 1e-6)[...,None]
+            img=Image.fromarray((np.clip(np.dstack((straight, alpha)),0,1)*255).astype(np.uint8), "RGBA")
+            self.photo=self.ImageTk.PhotoImage(img)
+            self.label.configure(image=self.photo)
+
+    def button_at(self, x, y):
+        if self.open<1:
+            return None
+        return next((name for name, (l,t,r,b) in self.buttons.items() if l<=x<=r and t<=y<=b), None)
+
+    def set_hover(self, name):
+        if name!=self.hover:
+            self.hover=name
+            self.win.configure(cursor="hand2" if name else "")
+            self.render()
+
+    def motion(self, e):
+        self.set_hover(self.button_at(e.x, e.y))
+
+    def click(self, e):
+        name=self.button_at(e.x, e.y)
+        if not name or not self.info:
+            return
+        if name=="play_pause": #show the change right away; spotify confirms a moment later
+            self.info["playing"]=not self.info["playing"]
+            self.info["progress"]=int(self.progress()*self.info["duration"])
+            self.info["at"]=time.monotonic()
+            self.info.pop("paused_at", None) if self.info["playing"] else self.info.__setitem__("paused_at", time.monotonic())
+            self.render()
+        self.orb.win.lift() #a click brings the pill forward; the orb belongs on top
+        threading.Thread(target=music.control, args=(name, music_context), daemon=True).start()
+
 class NaviGUI:
     COLORS={"bg":"#1e1f26","panel":"#2a2c36","text":"#e6e6eb","muted":"#8b8d98",
             "you":"#7cc4ff","navi":"#b39dff","system":"#8b8d98","accent":"#6c5ce7"}
@@ -6032,6 +6319,7 @@ class NaviGUI:
         self.processing=False
         self.typed=False
         self.orb=StatusOrb(root) if IS_WINDOWS or IS_MAC else NoOrb()
+        self.music=MusicPanel(root, self.orb) if isinstance(self.orb, StatusOrb) else None
 
         self.set_status("stopped")
         self.add_line("system", f'Always listening. Say "{bot_name}" or type a question below.')
@@ -6085,6 +6373,9 @@ class NaviGUI:
                 self.update_orb()
                 self.awake_text.configure(text="Awake - try: brief me, remind me, weather, check my mail, what can you do, what time is it, take a note, 5 miles in km, goodbye" if value
                                           else f'Say "{bot_name}" to wake me up')
+            elif kind=="music":
+                if self.music:
+                    self.music.update(value)
             elif kind=="stopped":
                 self.worker=None
                 self.set_status("stopped")
@@ -6216,7 +6507,7 @@ class SettingsWindow:
         for name, build in (("Voice", self.voice_page), ("Voice training", self.training_page), ("Messages", self.messages_page),
                             ("Listening", self.listening_page),
                             ("Day briefing", self.briefing_page), ("Homework alerts", self.homework_page), ("Location", self.location_page),
-                            ("Phone alerts", self.phone_page), ("Keys", self.keys_page), ("Calendar", self.calendar_page), ("Memory", self.memory_page),
+                            ("Phone alerts", self.phone_page), ("Music", self.music_page), ("Keys", self.keys_page), ("Calendar", self.calendar_page), ("Memory", self.memory_page),
                             ("Startup", self.startup_page)):
             self.body=tk.Frame(stack, bg=c["bg"])
             self.body.grid(row=0, column=0, sticky="nsew")
@@ -6616,6 +6907,56 @@ class SettingsWindow:
         apply_keys(values)
         have=sum(1 for v in values.values() if v)
         self.keys_status.configure(text=f"Saved. {have} of {len(values)} keys are set, and I'm using them now.")
+
+    def music_page(self):
+        self.section("Music (Spotify)")
+        self.label("Say things like \"play Blinding Lights\", \"pause\", \"next song\", \"what's playing\" or \"play my chill "
+                   "playlist\". I control Spotify on any of your devices (this PC, your phone, a speaker), so the Spotify app "
+                   "doesn't have to be open here. Playing and skipping needs Spotify Premium.")
+        self.music_status=self.label("", muted=False)
+        self.buttons(("Connect Spotify", self.connect_music, True), ("Disconnect", self.disconnect_music, False),
+                     ("Spotify dashboard", lambda: webbrowser.open(music.DASHBOARD), False))
+        self.check("Show what's playing next to the orb", "music_panel", command=None)
+        self.section("Setting it up")
+        self.label("1. In the Spotify dashboard press Create app, name it Navi and tick Web API.\n"
+                   "2. Under Redirect URIs add this address exactly (Copy puts it on your clipboard):")
+        row=tk.Frame(self.body, bg=NaviGUI.COLORS["bg"])
+        uri=self.entry(row, 34)
+        uri.insert(0, music.REDIRECT_URI)
+        uri.configure(state="readonly", readonlybackground=NaviGUI.COLORS["panel"])
+        uri.pack(side="left", ipady=3)
+        def copy():
+            self.win.clipboard_clear()
+            self.win.clipboard_append(music.REDIRECT_URI)
+        b=self.gui.make_button(row, "Copy", copy)
+        b.configure(padx=10, pady=1, font=(UI_FONT,9))
+        b.pack(side="left", padx=(6,0))
+        row.grid(row=self.row, column=0, columnspan=2, sticky="w", pady=(2,4))
+        self.row+=1
+        self.label("3. Save, copy the app's Client ID into the Keys page, press Save keys, then press Connect Spotify here.")
+        self.show_music_status()
+
+    def show_music_status(self):
+        if not self.win.winfo_exists():
+            return
+        if not music.client_id():
+            text="Not set up yet: add your Spotify client ID on the Keys page."
+        elif music.connected():
+            text="Connected to Spotify."
+        elif music.signing_in.locked():
+            text="Waiting for you to sign in to Spotify in your browser..."
+        else:
+            text="Not connected. Press Connect Spotify."
+        self.music_status.configure(text=text)
+        self.win.after(2000, self.show_music_status) #picks up a sign-in that finishes in the browser
+
+    def connect_music(self):
+        self.gui.run_task(music.connect, music_context)
+
+    def disconnect_music(self):
+        music.forget_token()
+        music.poke()
+        self.show_music_status()
 
     def calendar_page(self):
         self.section("Google Calendar")

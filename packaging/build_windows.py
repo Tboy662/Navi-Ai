@@ -25,7 +25,8 @@ DATA = ["sounds", "minecraft_knowledge.md", "minecraft_examples.json", "voice_cl
         ".env.example", "vosk_model", "vosk_spk_model"]
 OPTIONAL_DATA = {"vosk_model", "vosk_spk_model"}  # offline wake word models: Navi falls back to Google without them
 EXCLUDE = ["matplotlib", "scipy", "pandas", "torch", "IPython", "pytest", "setuptools"]
-SECRET_FILES = [".env", "navi_settings.json", "navi_memory.json", "google_token.json", "google_credentials.json"]
+SECRET_FILES = [".env", "navi_settings.json", "navi_memory.json", "google_token.json", "google_credentials.json",
+                "spotify_token.json"]
 
 
 def run(args):
