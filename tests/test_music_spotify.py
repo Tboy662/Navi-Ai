@@ -297,6 +297,23 @@ os.environ["YOUTUBE_API_KEY"]="not a key&q=x"
 check("a malformed key is never sent", music.youtube_key()=="" and run("play hello on youtube") and "add a YouTube API key" in said[-1])
 os.environ["YOUTUBE_API_KEY"]=""
 
+#--- navi's own music window ----------------------------------------------------------------------------------------
+asked=[]
+def window_play(q):
+    asked.append(q)
+    if q=="broken":
+        raise RuntimeError("Browser error")
+    return "The Weeknd - Blinding Lights (Official Video)"
+ctx.browser_play=window_play
+said.clear(); opened.clear()
+check("play X uses navi's music window, no key needed", run("play blinding lights by the weeknd") and asked==["blinding lights the weeknd"] and said[-1]=="Playing The Weeknd - Blinding Lights (Official Video)." and not opened)
+check("play X on youtube too", run("play hello on youtube") and asked[-1]=="hello")
+run("play broken on youtube")
+check("a failure in the window is explained", "couldn't play that" in said[-1])
+ctx.show_browser=lambda: False
+check("show the music window when it isn't open", run("show the music window") and "isn't open" in said[-1])
+ctx.browser_play=None
+
 #--- album art -----------------------------------------------------------------------------------------------------
 check("art from spotify's image server", music.art_url_ok("https://i.scdn.co/image/ab67616d0000b273"))
 for bad in ["http://i.scdn.co/x", "https://i.scdn.co.evil.com/x", "https://evil.com/i.scdn.co", "https://user:pw@i.scdn.co/x",

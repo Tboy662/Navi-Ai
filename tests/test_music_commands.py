@@ -20,7 +20,7 @@ CASES={
     "turn up the music": ("volume_step", 15),
     "restart this song": ("seek_to", 0), "play it again": ("seek_to", 0), "skip ahead 30 seconds": ("seek_by", 30), "go back 10 seconds": ("seek_by", -10),
     "play the music on my phone": ("transfer", "phone"), "switch to my phone": ("transfer", "phone"), "move the music to kitchen speaker": ("transfer", "kitchen speaker"),
-    "spotify devices": ("devices", None),
+    "spotify devices": ("devices", None), "show the music window": ("show_browser", None),
     "play blinding lights on youtube": ("youtube", "blinding lights"), "put on lofi beats on you tube": ("youtube", "lofi beats"),
     "connect spotify": ("connect", None), "disconnect spotify": ("disconnect", None),
     "play blinding lights by the weeknd": ("play", "blinding lights by the weeknd"), "play taylor swift": ("play", "taylor swift"),

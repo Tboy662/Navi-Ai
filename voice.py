@@ -1268,6 +1268,85 @@ def get_browser():
         agent_browser=AgentBrowser()
     return agent_browser
 
+MUSIC_BROWSER_PROFILE=os.path.join(AGENT_BROWSER_DIR, "music_profile")
+#presses youtube's own "Skip" button as soon as an ad allows it (the same button you'd click); ads that can't be skipped play
+SKIP_AD_JS="""
+if (location.hostname.endsWith("youtube.com")) setInterval(() => {
+  const b = document.querySelector(".ytp-skip-ad-button, .ytp-ad-skip-button, .ytp-ad-skip-button-modern");
+  if (b && b.offsetParent !== null) b.click();
+}, 700);
+"""
+
+class MusicBrowser(AgentBrowser):
+    #navi's own window for music: songs play on youtube there, not in your browser or agent mode's. It starts minimized
+    #out of the way, keeps playing, and windows' media controls see it, so the orb shows the song and pause/skip work
+    def ensure_page(self):
+        if self.context is None:
+            launch=lambda: self.pw.chromium.launch_persistent_context(MUSIC_BROWSER_PROFILE, headless=False, no_viewport=True,
+                args=["--window-size=1000,700", "--autoplay-policy=no-user-gesture-required"])
+            try:
+                self.context=launch()
+            except Exception as e:
+                if "playwright install" not in str(e) and "Executable doesn't exist" not in str(e):
+                    raise
+                install_agent_browser()
+                self.context=launch()
+            self.context.on("close", lambda _: setattr(self, "context", None))
+            self.context.add_init_script(SKIP_AD_JS)
+            if not self.context.pages:
+                self.context.new_page()
+        if self.page is None or self.page.is_closed():
+            open_pages=[p for p in self.context.pages if not p.is_closed()]
+            self.page=open_pages[-1] if open_pages else self.context.new_page()
+        return self.page
+
+    def minimize(self, page):
+        try:
+            cdp=page.context.new_cdp_session(page)
+            window=cdp.send("Browser.getWindowForTarget")["windowId"]
+            cdp.send("Browser.setWindowBounds", {"windowId": window, "bounds": {"windowState": "minimized"}})
+        except Exception:
+            pass
+
+    def play_youtube(self, query):
+        #finds the song on youtube and plays it (with youtube's mix of similar songs after it). Returns its title
+        def go():
+            page=self.ensure_page()
+            page.goto("https://www.youtube.com/results?search_query="+urllib.parse.quote_plus(query[:200]),
+                      wait_until="domcontentloaded", timeout=30000)
+            if "consent." in page.url: #europe's cookie question: the most private answer
+                page.get_by_role("button", name=re.compile(r"reject all", re.I)).first.click(timeout=10000)
+                page.wait_for_load_state("domcontentloaded")
+            link="a#video-title[href^='/watch?v=']"
+            page.wait_for_selector(link, timeout=20000)
+            href, title=page.eval_on_selector(link, "e=>[e.getAttribute('href'), e.getAttribute('title')||e.textContent]")
+            q=urllib.parse.parse_qs(urllib.parse.urlsplit(href).query)
+            video=(q.get("v") or [""])[0]
+            if not music.VIDEO_ID_RE.match(video): #only a real youtube video id goes into the address
+                return {"error": "no video"}
+            mix=(q.get("list") or [""])[0]
+            url="https://www.youtube.com/watch?v="+video+(("&list="+mix) if re.fullmatch(r"RD[A-Za-z0-9_-]{1,60}", mix) else "")
+            page.goto(url, wait_until="domcontentloaded", timeout=30000)
+            self.minimize(page)
+            return {"title": music.clean(title)}
+        result=self.run(go, timeout=90)
+        if not isinstance(result, dict) or "error" in result:
+            raise RuntimeError(result if isinstance(result, str) else "no video")
+        return result["title"]
+
+music_browser=None
+def music_browser_play(query):
+    global music_browser
+    if music_browser is None:
+        music_browser=MusicBrowser()
+    return music_browser.play_youtube(query)
+
+def show_music_browser():
+    if music_browser is not None and music_browser.context is not None:
+        music_browser.run(lambda: music_browser.ensure_page().bring_to_front())
+        return True
+    return False
+
 def show_agent_browser():
     #for the gui button: open the agent's browser (or bring it forward) so you can watch or inspect it with F12
     b=get_browser()
@@ -5858,7 +5937,8 @@ extras_context=extras.Context(say=lambda text, lang="en": text_to_speech(text, l
                               passthrough=(StopListening,))
 music_context=music.Context(say=lambda text: text_to_speech(text), hear=lambda: hear(), said_yes=lambda text: said_yes(text),
                             data_path=lambda name: data_path(name), post=gui_post, open_url=webbrowser.open,
-                            media_key=lambda action: media_command({"next": "next", "previous": "previous"}.get(action, "pause")))
+                            media_key=lambda action: media_command({"next": "next", "previous": "previous"}.get(action, "pause")),
+                            browser_play=lambda query: music_browser_play(query), show_browser=lambda: show_music_browser())
 smarthome_context=smarthome.Context(say=lambda text: text_to_speech(text), hidden=lambda: settings["smart_hidden"],
                                     post=gui_post, passthrough=(StopListening,))
 
@@ -6663,6 +6743,8 @@ class NaviGUI:
         stop_event.set()
         if agent_browser is not None:
             agent_browser.close()
+        if music_browser is not None:
+            music_browser.close()
         self.root.destroy()
 
 def apply_keys(values):

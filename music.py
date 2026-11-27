@@ -53,7 +53,7 @@ SETUP_HELP=("To use Spotify, open Settings, then Keys, and add a Spotify client 
 class Context:
     #what the music commands need from voice.py, so this file can be tested on its own
     def __init__(self, say, hear, said_yes, data_path, post=lambda kind, value: None, open_url=lambda url: None,
-                 media_key=lambda action: None):
+                 media_key=lambda action: None, browser_play=None, show_browser=lambda: False):
         self.say=say
         self.hear=hear
         self.said_yes=said_yes
@@ -61,6 +61,8 @@ class Context:
         self.post=post #a line (or the now playing info) for the gui
         self.open_url=open_url
         self.media_key=media_key #media_key("play_pause" / "next" / "previous"): the keyboard's media keys, for when spotify isn't set up
+        self.browser_play=browser_play #browser_play(query) -> title: plays a song in navi's own music window (youtube)
+        self.show_browser=show_browser #brings that window up; False if it isn't open
 
 class SpotifyError(Exception):
     def __init__(self, status, reason="", message=""):
@@ -446,11 +448,26 @@ def _session_api():
     except Exception: #not installed, or not windows
         return None
 
-async def _pick_session():
+_last_app="" #the app navi last played or paused, so "resume" goes back to it (not to some other video that's playing)
+
+def remember_app(app):
+    global _last_app
+    _last_app=str(app or "").lower()
+
+async def _pick_session(control=False):
     manager=await _session_api().request_async()
     sessions=list(manager.get_sessions())
-    spotify=[s for s in sessions if "spotify" in str(s.source_app_user_model_id).lower()]
-    return spotify[0] if spotify else manager.get_current_session()
+    if control and _last_app:
+        mine=[s for s in sessions if str(s.source_app_user_model_id).lower()==_last_app]
+        if mine:
+            return mine[0]
+    def is_spotify(s):
+        return "spotify" in str(s.source_app_user_model_id).lower()
+    playing=[s for s in sessions if int(s.get_playback_info().playback_status)==4]
+    for group in (playing, [s for s in sessions if is_spotify(s)]): #what's playing (spotify first), else spotify paused
+        if group:
+            return sorted(group, key=lambda s: (not is_spotify(s), "chrome" not in str(s.source_app_user_model_id).lower()))[0]
+    return manager.get_current_session()
 
 async def _read_thumbnail(ref):
     from winrt.windows.storage.streams import Buffer, InputStreamOptions
@@ -501,13 +518,23 @@ async def _session_info(last):
             "progress": progress, "duration": duration, "device": "this PC", "shuffle": False, "repeat": "",
             "at": time.monotonic(), "source": "local"}
 
+def _run_async(make):
+    #runs make() (a coroutine) to the end; on its own thread if this one already has an event loop (like playwright's)
+    import asyncio
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(make())
+    import concurrent.futures
+    with concurrent.futures.ThreadPoolExecutor(1) as pool:
+        return pool.submit(lambda: asyncio.run(make())).result(timeout=15)
+
 def session_now_playing(last=None):
     #the song windows' media controls know about, or None. False if they can't be used (pywinrt missing)
     if _session_api() is None:
         return False
-    import asyncio
     try:
-        return asyncio.run(_session_info(last))
+        return _run_async(lambda: _session_info(last))
     except Exception as e:
         print("media session err;", type(e).__name__)
         return False
@@ -518,14 +545,15 @@ def session_control(action):
         return False
     import asyncio
     async def go():
-        session=await _pick_session()
+        session=await _pick_session(control=True)
         if session is None:
             return False
+        remember_app(session.source_app_user_model_id)
         call={"play_pause": session.try_toggle_play_pause_async, "next": session.try_skip_next_async,
               "previous": session.try_skip_previous_async}[action]
         return bool(await call())
     try:
-        return asyncio.run(go())
+        return _run_async(go)
     except Exception as e:
         print("media session err;", type(e).__name__)
         return False
@@ -608,6 +636,23 @@ def play_youtube(query, ctx):
     ctx.open_url("https://www.youtube.com/watch?v="+vid)
     ctx.say(f"Playing {title} on YouTube.")
 
+def play_anywhere(query, ctx):
+    #navi's own music window if it can (no key needed), else youtube in your browser with the api key
+    if ctx.browser_play:
+        ctx.post("system", f"Finding {query} on YouTube...")
+        try:
+            title=ctx.browser_play(query)
+            remember_app("chrome.exe") #navi's music window
+            ctx.say(f"Playing {title}." if title else "Playing it.")
+            poke()
+            return
+        except Exception as e:
+            print("music window err;", type(e).__name__)
+            if not youtube_key():
+                ctx.say("I couldn't play that in my music window. Check your internet connection and try again.")
+                return
+    play_youtube(query, ctx)
+
 def open_spotify_search(query, ctx):
     #the spotify app's search (or the web player's, without the app), so you can press play
     q=urllib.parse.quote(query[:100], safe="")
@@ -644,8 +689,8 @@ def local_handle(action, arg, t, ctx):
     if action in ("play", "queue", "shuffle_play") and arg:
         kind, name, artist=parse_request(arg)
         query=" ".join(w for w in (name, artist) if w).strip() or arg
-        if youtube_key() and "spotify" not in t:
-            play_youtube(query, ctx)
+        if (ctx.browser_play or youtube_key()) and "spotify" not in t:
+            play_anywhere(query, ctx)
         else:
             open_spotify_search(query, ctx)
             ctx.say(f"I opened the search for {query} in Spotify. Press play there."+("" if youtube_key() else
@@ -747,6 +792,8 @@ def command(t):
                  r"\bwho (?:sings|is singing|sang|made) (?:this|that)\b|\bname (?:of )?(?:this|the|that) song\b|\bwhat am i listening to\b|"
                  r"\bwhat(?:'s| is) (?:currently |now )playing\b", t):
         return "what", None
+    if re.fullmatch(r"(?:show|open|bring up) (?:the |my )?(?:music|youtube) (?:window|browser|player)", t):
+        return "show_browser", None
     m=re.match(r"^(?:play|put on|throw on|blast|queue up|queue)\s+(.+?)\s+(?:on|from|in|using) (?:youtube|you tube)$", t)
     if m:
         return "youtube", m.group(1)
@@ -994,7 +1041,11 @@ def handle(text, ctx):
         connect(ctx)
         return True
     if action=="youtube":
-        play_youtube(arg, ctx)
+        play_anywhere(arg, ctx)
+        return True
+    if action=="show_browser":
+        if not ctx.show_browser():
+            ctx.say("The music window isn't open. Say play and a song to start it.")
         return True
     if action=="disconnect":
         forget_token()
