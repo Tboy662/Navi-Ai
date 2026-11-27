@@ -99,6 +99,21 @@ Notes are kept in `navi_notes.json` next to `voice.py`, which is never committed
 
 It can also run when Navi starts and when the PC wakes from sleep (Settings > Day briefing), and can be sent to your phone.
 
+## Smart home (New)
+
+Set it up in Settings > Smart home: Home Assistant (address and token on the Keys page) and/or a Philips Hue bridge (Find bridge, then Pair and press the button on the bridge).
+
+| Say | What happens |
+| --- | --- |
+| "turn on the kitchen light", "turn the desk lamp off", "lights off", "turn off all the lights", "kill the lights" | Turns lights on or off. "The lights" means every light; anything else has to be in a device's name. |
+| "turn on the fan plug", "switch off the heater plug", "turn on the bedroom fan" | Plugs, switches and fans. |
+| "dim the bedroom", "dim the bedroom to 30 percent", "living room lights to 50%", "make the lights brighter", "set the kitchen to full brightness" | Brightness (0 percent turns it off). |
+| "make the living room blue", "turn the lights red", "set the desk lamp to warm white", "make the lights cool" | Colors, and warm, neutral, cool or daylight white. |
+| "activate the movie scene", "turn on the relax scene" | Home Assistant scenes and Hue scenes. |
+| "is the porch light on", "what lights are on", "did I leave the garage light on" | Says what's on, and how bright. |
+| "what smart devices do I have", "list my lights" | Reads out every room, light, plug, fan and scene Navi can control. |
+| "turn off the lights in 10 minutes" | Does it later (up to 12 hours; forgotten if Navi closes). |
+
 ## Weather and places
 
 | Say | What happens |
@@ -154,6 +169,7 @@ It can also run when Navi starts and when the PC wakes from sleep (Settings > Da
 - **Startup**: start with Windows.
 - **Listening**: offline wake word, saying "stop" to interrupt, only wake for my voice.
 - **Location**: your city or exact address, Celsius or Fahrenheit, and food filters.
+- **Smart home**: test Home Assistant, find and pair a Hue bridge, see your devices and hide any Navi should leave alone.
 - **Phone alerts**: reminders and briefings on your phone through the free ntfy app (always, only when you're away, or never).
 - **Calendar**: connect or disconnect Google Calendar.
 - **Memory**: see, add and forget what Navi remembers.
@@ -171,5 +187,7 @@ These are the rules the features follow, and what was tested before this update 
 - **Notes** are saved to one fixed file; nothing you say becomes a file path. Notes are capped at 1000 characters and 500 notes, and a damaged notes file is ignored instead of crashing Navi.
 - **Closing apps** only sends the normal close message (like clicking X), skips Navi's own windows and the taskbar and desktop, and refuses vague targets like "close it" or "close everything".
 - **Private files stay out of git**: `.env`, settings, memory, notes, lists, reminders and Google sign-in files (`google_token.json`, `client_secret*.json`) are all in `.gitignore`.
+
+- **Smart home** only ever touches lights, switches and plugs, fans and scenes. Locks, doors, garage doors, alarms, cameras and thermostats are skipped even when Home Assistant has them, and so is any device you hide in Settings > Smart home. What you say is only matched against the names your hub reports, so it never becomes an address, an entity id or a service: the only calls are turn on and turn off. "Turn off the front door" does nothing, and a name that isn't a device never falls back to every light. The Home Assistant token is only sent to your Home Assistant, and only over https unless that address is on your home network; the Hue bridge has to be a home network address too. Each request times out after 5 seconds, and a hub that doesn't answer is skipped for a minute so other commands stay fast. Tested with about 50 checks against fake hubs, including locks, garage doors, hidden devices, public and tricky addresses, a wrong token and a hub that's down.
 
 Tests for the new commands (about 80 checks, including the attacks above) were run against `extras.py` before committing.
