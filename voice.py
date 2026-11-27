@@ -7326,7 +7326,8 @@ class SettingsWindow:
         self.section("Music (Spotify)")
         self.label("Say things like \"play Blinding Lights\", \"pause\", \"next song\", \"what's playing\" or \"play my chill "
                    "playlist\". I control Spotify on any of your devices (this PC, your phone, a speaker), so the Spotify app "
-                   "doesn't have to be open here. Playing and skipping needs Spotify Premium.")
+                   "doesn't have to be open here. Spotify only allows this if the account that makes the app (below) has "
+                   "Premium. Without it I use your keyboard's media keys and open songs in the Spotify web player instead.")
         self.music_status=self.label("", muted=False)
         self.buttons(("Connect Spotify", self.connect_music, True), ("Disconnect", self.disconnect_music, False),
                      ("Spotify dashboard", lambda: webbrowser.open(music.DASHBOARD), False))
@@ -7355,6 +7356,8 @@ class SettingsWindow:
             return
         if not music.client_id():
             text="Not set up yet: add your Spotify client ID on the Keys page."
+        elif music.connected() and music.problem:
+            text=music.problem
         elif music.connected():
             text="Connected to Spotify."
         elif music.signing_in.locked():

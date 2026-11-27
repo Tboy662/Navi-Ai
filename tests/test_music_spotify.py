@@ -30,9 +30,10 @@ def check(name, ok):
     failures+=0 if ok else 1
 
 class Resp:
-    def __init__(self, status, data=None, headers=None):
+    def __init__(self, status, data=None, headers=None, text=None):
         self.status_code=status
-        self.content=b"" if data is None else json.dumps(data).encode()
+        self.content=text.encode() if text is not None else b"" if data is None else json.dumps(data).encode()
+        self.text=self.content.decode()
         self.headers=headers or {}
     def json(self):
         return json.loads(self.content)
@@ -50,6 +51,7 @@ class Fake:
         self.premium=True
         self.playing=True
         self.token_status=200
+        self.owner_blocked=False
     def token(self, url, data=None, timeout=None):
         self.calls.append(("TOKEN", data.get("grant_type"), data))
         if self.token_status!=200:
@@ -59,6 +61,8 @@ class Fake:
         assert url.startswith("https://api.spotify.com/v1/"), url
         path=url[len(music.API):]
         self.calls.append((method, path, params, json))
+        if self.owner_blocked: #what spotify really sends when the app's owner has no premium (plain text, no json)
+            return Resp(403, text="Active premium subscription required for the owner of the app. When the subscription status changes, it can take a few hours before requests are allowed again.")
         if not self.premium and path.startswith("/me/player/") and method in ("PUT", "POST"):
             return Resp(403, {"error": {"status": 403, "message": "Player command failed: Premium required", "reason": "PREMIUM_REQUIRED"}})
         if path=="/me/player/devices":
@@ -202,7 +206,31 @@ run("pause")
 check("revoked token: disconnected and told", not music.connected() and "isn't connected" in said[-1])
 fake.reset()
 
+#the app's owner has no premium: spotify refuses everything with a plain-text 403
+music.sign_in(browser(), wait=10) #signed out by the test above
+fake.owner_blocked=True
+ctx.told_about_premium=False
+run("pause")
+check("owner without premium: pause uses the media key and explains why", keys==["play_pause"] and said and "doesn't have Premium" in said[0])
+check("settings shows the reason", "needs Premium" in music.problem)
+run("next song")
+check("...and only explains once", keys==["next"] and said==[])
+opened.clear()
+run("play blinding lights by the weeknd")
+check("play opens the song search in the web player", opened==[music.WEB_PLAYER+"/search/blinding%20lights%20the%20weeknd"] and "Press play there" in said[-1])
+run("what's playing")
+check("what's playing explains the block", "doesn't have Premium" in said[-1])
+said.clear()
+real_sign_in=music.sign_in
+music.sign_in=lambda open_url, wait=300: "ok" #the sign-in itself is tested above
+check("connect reports the block after signing in", music.finish_connect(ctx)=="owner_premium" and "signed in, but" in said[-1])
+music.sign_in=real_sign_in
+fake.reset()
+run("pause")
+check("the reason clears once spotify answers again", music.problem=="")
+
 #not connected: media keys for the basics, setup help for the rest
+music.forget_token()
 check("not connected: pause uses the media key", run("pause") and keys==["play_pause"])
 os.environ["SPOTIFY_CLIENT_ID"]=""
 check("not set up: play explains how", run("play hello by adele") and "Keys" in said[-1])

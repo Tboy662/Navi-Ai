@@ -167,7 +167,8 @@ PAGES = [
      "fields": [("HF_TOKEN", "Hugging Face token", True, _prefix("hf_", name="Hugging Face token"))]},
     {"title": "Music (Spotify)", "optional": True,
      "about": "Lets Navi play, pause and skip songs and show what's playing next to the orb, on any of your Spotify "
-              "devices, without the Spotify app open on this PC. Controlling playback needs Spotify Premium. "
+              "devices, without the Spotify app open on this PC. Spotify only allows this when the account that makes the app "
+              "below has Premium. "
               "This is a client ID, not a password: you sign in to Spotify in your browser afterwards.",
      "steps": ["Open the Spotify developer dashboard, sign in and press Create app.",
                "Name it Navi, tick Web API, and under Redirect URIs add exactly: " + SPOTIFY_REDIRECT,

@@ -164,7 +164,7 @@ TP-Link Kasa lights, switches and plugs on your Wi-Fi work with no setup. Tapo d
 
 ## Music (Spotify) (New)
 
-Navi controls Spotify on any of your devices (this PC, your phone, a speaker, the web player), so the Spotify app doesn't have to be open on this PC. Set it up once: add a Spotify client ID in Settings > Keys (Settings > Music shows how to make one), then say "connect Spotify" and sign in in your browser. Playing, pausing and skipping need Spotify Premium; that's Spotify's rule.
+Navi controls Spotify on any of your devices (this PC, your phone, a speaker, the web player), so the Spotify app doesn't have to be open on this PC. Set it up once: add a Spotify client ID in Settings > Keys (Settings > Music shows how to make one), then say "connect Spotify" and sign in in your browser. Spotify only lets Navi in if the Spotify account that made the app in the developer dashboard has Premium; that's Spotify's rule. Without it, Navi says so once, uses the keyboard's media keys for pause / resume / next / previous, and opens "play ..." requests as a search in the Spotify web player.
 
 | Say | What happens |
 | --- | --- |

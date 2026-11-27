@@ -44,6 +44,9 @@ ART_HOSTS=("i.scdn.co", "mosaic.scdn.co", "image-cdn-ak.spotifycdn.com", "image-
            "daily-mix.scdn.co", "newjams-images.scdn.co", "lineup-images.scdn.co", "wrapped-images.spotifycdn.com")
 ART_MAX_BYTES=2_000_000
 TIMEOUT=10
+OWNER_HELP=("Spotify is blocking my Spotify app because the Spotify account that created it in the developer dashboard "
+            "doesn't have Premium. Spotify requires that now. Make the app with a Premium account and put its client ID in "
+            "Settings, then Keys. If you just got Premium, it can take Spotify a few hours to notice.")
 SETUP_HELP=("To use Spotify, open Settings, then Keys, and add a Spotify client ID. The Music section there says how to "
             "make one. Then say connect Spotify.")
 
@@ -75,6 +78,13 @@ class NoDevice(Exception):
 def client_id():
     value=os.environ.get("SPOTIFY_CLIENT_ID", "").strip()
     return value if CLIENT_ID_RE.match(value) else ""
+
+problem="" #why spotify is refusing navi right now ("" when it's fine), shown in settings > music
+problem_reason=""
+
+def note_problem(reason, text):
+    global problem, problem_reason
+    problem, problem_reason=text, reason
 
 #tokens
 _lock=threading.RLock()
@@ -248,6 +258,8 @@ def call(method, path, params=None, body=None, retry=True):
     if r.status_code==204 or not r.content:
         if r.status_code>=400:
             raise SpotifyError(r.status_code)
+        if problem_reason=="OWNER_PREMIUM":
+            note_problem("", "")
         return None
     try:
         data=r.json()
@@ -256,7 +268,15 @@ def call(method, path, params=None, body=None, retry=True):
     if r.status_code>=400:
         err=(data or {}).get("error", {}) if isinstance(data, dict) else {}
         err=err if isinstance(err, dict) else {"message": str(err)}
-        raise SpotifyError(r.status_code, str(err.get("reason", "")), str(err.get("message", "")))
+        message=str(err.get("message", "")) if data is not None else r.text[:300] #some refusals are plain text, not json
+        reason=str(err.get("reason", ""))
+        if r.status_code==403 and "premium subscription required for the owner" in message.lower():
+            reason="OWNER_PREMIUM" #spotify's rule for developer apps: the account that made the app needs premium
+            note_problem(reason, "Spotify is refusing this app: the account that created it in the Spotify developer "
+                                 "dashboard needs Premium. Make the app with a Premium account and put its client ID on the Keys page.")
+        raise SpotifyError(r.status_code, reason, message)
+    if problem_reason=="OWNER_PREMIUM":
+        note_problem("", "")
     return data
 
 def playback():
@@ -384,7 +404,7 @@ class Watcher(threading.Thread):
                 except NotConnected:
                     pass
                 except (SpotifyError, requests.RequestException, ValueError) as e:
-                    wait=15
+                    wait=600 if getattr(e, "status", 0)==403 else 15 #a refused app stays refused for a while: don't keep asking
                     info=self.last if isinstance(e, requests.RequestException) else None #keep showing it through a network blip
             key=None if info is None else (info["id"], info["playing"], info["title"], info["shuffle"], info["repeat"], info["progress"]//4000)
             if key!=(None if self.last is None else self.last.get("_key")):
@@ -608,11 +628,13 @@ def start_playing(ctx, body=None):
     return True
 
 def say_error(ctx, e):
-    if isinstance(e, NotConnected):
+    if isinstance(e, SpotifyError) and e.reason=="OWNER_PREMIUM":
+        ctx.say(OWNER_HELP)
+    elif isinstance(e, NotConnected):
         ctx.say("Spotify isn't connected anymore. Say connect Spotify to sign in again.")
     elif isinstance(e, requests.RequestException):
         ctx.say("I couldn't reach Spotify. Check your internet connection.")
-    elif e.status==403 and ("PREMIUM" in e.reason.upper() or "premium" in e.message.lower()):
+    elif premium_refusal(e):
         ctx.say("Spotify only lets apps control playback on a Premium account. I can still tell you what's playing.")
     elif e.status==403:
         ctx.say("Spotify didn't allow that right now. Some songs and devices can't be controlled.")
@@ -621,6 +643,28 @@ def say_error(ctx, e):
     else:
         ctx.say("Spotify had a problem with that. Try again in a moment.")
         print("spotify err;", e.status, e.reason)
+
+def premium_refusal(e):
+    return isinstance(e, SpotifyError) and e.status==403 and ("PREMIUM" in e.reason.upper() or "premium" in e.message.lower())
+
+def without_api(action, arg, ctx, e):
+    #spotify refuses navi (no premium): the keyboard's media keys still control the spotify app (or anything playing),
+    #and a song can be looked up in the spotify web player, where you press play yourself. True if that covered it
+    if action in ("pause", "resume", "next", "previous"):
+        ctx.media_key({"pause": "play_pause", "resume": "play_pause"}.get(action, action))
+    elif action in ("play", "queue", "shuffle_play") and arg:
+        kind, name, artist=parse_request(arg)
+        query=" ".join(w for w in (name, artist) if w).strip()
+        if not query:
+            return False
+        ctx.open_url(WEB_PLAYER+"/search/"+urllib.parse.quote(query[:100], safe=""))
+        ctx.say(f"Spotify won't let me pick songs, so I opened the search for {query} in Spotify. Press play there.")
+    else:
+        return False
+    if not getattr(ctx, "told_about_premium", False): #explain once, not on every pause and skip
+        ctx.told_about_premium=True
+        say_error(ctx, e)
+    return True
 
 signing_in=threading.Lock()
 
@@ -647,9 +691,15 @@ def finish_connect(ctx):
                        f"{REDIRECT_URI} to your app in the Spotify dashboard.")
     try:
         result=sign_in(ctx.open_url)
-    except (requests.RequestException, SpotifyError):
+        if result=="ok":
+            call("GET", "/me") #signed in, but does spotify let this app in?
+    except SpotifyError as e:
+        result="owner_premium" if e.reason=="OWNER_PREMIUM" else "network"
+    except requests.RequestException:
         result="network"
-    ctx.say({"ok": "Spotify is connected. Try saying play some music.",
+    except NotConnected:
+        result="rejected"
+    ctx.say({"owner_premium": "You're signed in, but "+OWNER_HELP[0].lower()+OWNER_HELP[1:],"ok": "Spotify is connected. Try saying play some music.",
              "port_busy": f"Something else on this PC is using port {REDIRECT_PORT}, so I can't finish signing in. Close it and try again.",
              "cancelled": "Okay, I didn't connect Spotify.",
              "timeout": "The sign-in took too long. Say connect Spotify to try again.",
@@ -691,7 +741,10 @@ def handle(text, ctx):
             ctx.media_key("play_pause" if action=="pause" else action)
         else:
             ctx.say("Nothing is playing on Spotify right now.")
-    except (SpotifyError, NotConnected, requests.RequestException) as e:
+    except SpotifyError as e:
+        if not ((e.reason=="OWNER_PREMIUM" or premium_refusal(e)) and without_api(action, arg, ctx, e)):
+            say_error(ctx, e)
+    except (NotConnected, requests.RequestException) as e:
         say_error(ctx, e)
     poke()
     return True
@@ -710,7 +763,10 @@ def control(action, ctx):
             player("POST", "/me/player/"+action)
     except NoDevice:
         ctx.say("Nothing is playing on Spotify right now.")
-    except (SpotifyError, NotConnected, requests.RequestException) as e:
+    except SpotifyError as e:
+        if not (premium_refusal(e) and without_api({"play_pause": "pause"}.get(action, action), None, ctx, e)):
+            say_error(ctx, e)
+    except (NotConnected, requests.RequestException) as e:
         say_error(ctx, e)
     poke()
 
