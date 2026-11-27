@@ -346,6 +346,8 @@ def art_url_ok(url):
 
 def fetch_art(url):
     #album art bytes, or None. Only from spotify's image servers, at most ART_MAX_BYTES, no redirects
+    if isinstance(url, str) and url.startswith("local:"): #from windows' media controls, already read
+        return _local_art.get(url)
     if not art_url_ok(url):
         return None
     try:
@@ -432,8 +434,112 @@ def spotify_titles():
     user32.EnumWindows(each, 0)
     return titles
 
+#windows' own media controls (the same ones the volume flyout shows): the song, artist, album art and position of
+#whatever app is playing, and play/pause/skip aimed at that app. Needs the pywinrt packages; without them navi falls
+#back to the spotify app's window title. Prefers spotify, then whatever windows thinks is current
+_local_art={} #"local:<song>" -> album art bytes, so the gui can show it (only the latest few are kept)
+
+def _session_api():
+    try:
+        from winrt.windows.media.control import GlobalSystemMediaTransportControlsSessionManager as Manager
+        return Manager
+    except Exception: #not installed, or not windows
+        return None
+
+async def _pick_session():
+    manager=await _session_api().request_async()
+    sessions=list(manager.get_sessions())
+    spotify=[s for s in sessions if "spotify" in str(s.source_app_user_model_id).lower()]
+    return spotify[0] if spotify else manager.get_current_session()
+
+async def _read_thumbnail(ref):
+    from winrt.windows.storage.streams import Buffer, InputStreamOptions
+    stream=await ref.open_read_async()
+    size=min(int(stream.size), ART_MAX_BYTES)
+    if size<=0 or int(stream.size)>ART_MAX_BYTES:
+        return None
+    buf=Buffer(size)
+    out=await stream.read_async(buf, size, InputStreamOptions.READ_AHEAD)
+    return bytes(memoryview(out))[:size]
+
+async def _session_info(last):
+    import datetime
+    session=await _pick_session()
+    if session is None:
+        return None
+    props=await session.try_get_media_properties_async()
+    title=clean(props.title)
+    if not title:
+        return None
+    status=int(session.get_playback_info().playback_status) #4 playing, 5 paused
+    timeline=session.get_timeline_properties()
+    duration=max(0, int((timeline.end_time-timeline.start_time).total_seconds()*1000))
+    progress=max(0, int(timeline.position.total_seconds()*1000))
+    if status==4 and timeline.last_updated_time: #windows only updates the position now and then: add the time since
+        since=(datetime.datetime.now(datetime.timezone.utc)-timeline.last_updated_time).total_seconds()
+        if 0<since<24*3600:
+            progress+=int(since*1000)
+    if duration and progress>duration:
+        progress=duration
+    artist=clean(props.artist) or clean(props.album_artist)
+    song_id=clean(f"{artist} - {title}" if artist else title, 200)
+    art=""
+    if props.thumbnail is not None:
+        art="local:"+song_id
+        if art not in _local_art:
+            try:
+                data=await _read_thumbnail(props.thumbnail)
+            except Exception:
+                data=None
+            if data:
+                if len(_local_art)>8:
+                    _local_art.clear()
+                _local_art[art]=data
+            else:
+                art=""
+    return {"title": title, "artist": artist, "art": art, "id": song_id, "type": "track", "playing": status==4,
+            "progress": progress, "duration": duration, "device": "this PC", "shuffle": False, "repeat": "",
+            "at": time.monotonic(), "source": "local"}
+
+def session_now_playing(last=None):
+    #the song windows' media controls know about, or None. False if they can't be used (pywinrt missing)
+    if _session_api() is None:
+        return False
+    import asyncio
+    try:
+        return asyncio.run(_session_info(last))
+    except Exception as e:
+        print("media session err;", type(e).__name__)
+        return False
+
+def session_control(action):
+    #play/pause, next or previous on the app that's playing. True if windows took it
+    if _session_api() is None:
+        return False
+    import asyncio
+    async def go():
+        session=await _pick_session()
+        if session is None:
+            return False
+        call={"play_pause": session.try_toggle_play_pause_async, "next": session.try_skip_next_async,
+              "previous": session.try_skip_previous_async}[action]
+        return bool(await call())
+    try:
+        return asyncio.run(go())
+    except Exception as e:
+        print("media session err;", type(e).__name__)
+        return False
+
+def local_key(ctx, action):
+    #the media session first (it goes to spotify even when another app is in front), else the keyboard's media keys
+    if not session_control(action):
+        ctx.media_key(action)
+
 def local_now_playing(last=None):
-    #the song in the spotify app on this pc, or None. last: what was shown before, kept while it's paused
+    #the song on this pc, or None. last: what was shown before, kept while it's paused
+    info=session_now_playing(last)
+    if info is not False:
+        return info
     titles=spotify_titles()
     if not titles:
         return None
@@ -522,7 +628,7 @@ def local_handle(action, arg, t, ctx):
     if action=="pause" and "pause" not in t:
         return False #"stop" on its own isn't worth pressing play/pause for (it would start music if none was playing)
     if action in ("pause", "resume", "next", "previous"):
-        ctx.media_key({"pause": "play_pause", "resume": "play_pause"}.get(action, action))
+        local_key(ctx, {"pause": "play_pause", "resume": "play_pause"}.get(action, action))
         if watcher is not None:
             poke()
         return True
@@ -919,7 +1025,7 @@ def control(action, ctx):
     #a press on the orb's music controls: "play_pause", "next" or "previous"
     _ctx_paths(ctx)
     if not api_usable():
-        ctx.media_key(action)
+        local_key(ctx, action)
         poke()
         return
     try:

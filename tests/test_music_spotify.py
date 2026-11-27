@@ -93,6 +93,9 @@ music.requests.post=fake.token
 music.time.sleep=lambda s: None
 real_titles=music.spotify_titles
 music.spotify_titles=lambda: [] #the real spotify app on this pc mustn't change the results
+real_session=music.session_now_playing
+music.session_now_playing=lambda last=None: False #...nor windows' media controls (tested on their own below)
+music.session_control=lambda action: False
 
 #--- sign in -----------------------------------------------------------------------------------------------------
 def browser(code="CODE", state=None, path="/callback", tamper=None):
@@ -254,6 +257,10 @@ check("paused with nothing known shows nothing", music.local_now_playing(None) i
 music.spotify_titles=lambda: []
 check("app closed: nothing", music.local_now_playing(info) is None)
 check("real window scan runs without error", isinstance(real_titles(), list))
+got=real_session()
+check("windows' media controls answer (song info, None, or False without pywinrt)", got is None or got is False or (isinstance(got, dict) and got["source"]=="local"))
+if isinstance(got, dict) and got["art"]:
+    check("its album art is kept for the orb", 0<len(music.fetch_art(got["art"]) or b"")<=music.ART_MAX_BYTES)
 keys.clear()
 music.control("next", ctx)
 check("orb buttons use the media keys without the api", keys==["next"])

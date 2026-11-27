@@ -6263,7 +6263,9 @@ class MusicPanel:
             info=None
         if info and not info.get("playing"):
             old=self.info or {}
-            info["paused_at"]=old.get("paused_at") if old.get("id")==info.get("id") and old.get("paused_at") else time.monotonic()
+            same=old.get("id")==info.get("id")
+            #just paused: stays out for a while. Already paused when navi first saw it (like spotify left paused): stays hidden
+            info["paused_at"]=(old.get("paused_at") or time.monotonic()) if same and (old.get("playing") or old.get("paused_at")) else -1e9
         self.info=info
         show=bool(info) and (info["playing"] or time.monotonic()-info.get("paused_at", 0)<self.PAUSED_FOR)
         self.goal=1.0 if show else 0.0

@@ -181,7 +181,7 @@ Navi controls Spotify on any of your devices (this PC, your phone, a speaker, th
 | "connect Spotify", "disconnect Spotify" | Signs in or out. |
 | "play Blinding Lights on YouTube" | Finds the song on YouTube and starts it in your browser. Needs a free YouTube API key (Settings > Keys). |
 
-**Without Spotify Premium** Navi uses the Spotify app on this PC instead: it reads the song from the app's window, so "what's playing" and the orb's music bar still work (without album art or a progress line), and pause / resume / next / previous and the orb's buttons use the media keys. "play ..." plays the song on YouTube if you've added a YouTube key, or opens the search in the Spotify app so you can press play.
+**Without Spotify Premium** Navi uses the Spotify app on this PC instead, through Windows' own media controls (the pywinrt packages in requirements.txt): "what's playing" and the orb's music bar still work, with album art and progress, and pause / resume / next / previous and the orb's buttons go to Spotify. If nothing is playing in Spotify it shows whatever Windows says is playing (like a video in your browser). Without pywinrt it reads the song from Spotify's window title instead (no art or progress) and uses the media keys. "play ..." plays the song on YouTube if you've added a YouTube key, or opens the search in the Spotify app so you can press play.
 
 If nothing is playing anywhere, Navi moves playback to one of your devices that's on. If none are on, it opens the Spotify web player and starts there.
 
