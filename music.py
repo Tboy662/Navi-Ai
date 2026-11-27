@@ -390,8 +390,8 @@ def now_playing_info(state):
 #Free" (or similar) while paused, so navi reads the song from there and uses the keyboard's media keys to control it
 IDLE_TITLES={"", "spotify", "spotify free", "spotify premium"}
 
-def spotify_titles():
-    #titles of the spotify app's windows on this pc ([] if it isn't running, or not on windows)
+def spotify_titles(handles=False):
+    #titles of the spotify app's windows on this pc ([] if it isn't running, or not on windows). handles: their handles instead
     if os.name!="nt":
         return []
     import ctypes
@@ -431,7 +431,7 @@ def spotify_titles():
                 if exe(pid.value)=="spotify.exe":
                     buf=ctypes.create_unicode_buffer(n+1)
                     user32.GetWindowTextW(hwnd, buf, n+1)
-                    titles.append(buf.value)
+                    titles.append(hwnd if handles else buf.value)
         return True
     user32.EnumWindows(each, 0)
     return titles
@@ -636,6 +636,92 @@ def play_youtube(query, ctx):
     ctx.open_url("https://www.youtube.com/watch?v="+vid)
     ctx.say(f"Playing {title} on YouTube.")
 
+#the spotify app's own play buttons: without premium no app may start a song through spotify's api, but the spotify
+#app itself can. Navi opens a page in it with a spotify: link (liked songs, or a search), then presses that page's
+#"Play ..." button through windows' accessibility interface (the one screen readers use): no mouse, no keystrokes
+LIKED_WORDS=re.compile(r"^(?:my |the )?(?:liked|liked songs|likes|favorites|favourites|favorite songs|favourite songs|saved songs|library|my songs|hearted songs)$")
+
+def spotify_app_installed():
+    if os.name!="nt":
+        return False
+    try:
+        import winreg
+        winreg.CloseKey(winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Classes\spotify"))
+        return True
+    except OSError:
+        return False
+
+def _spotify_window():
+    #the spotify app's main window, through the accessibility interface, or None
+    hwnds=spotify_titles(handles=True)
+    if not hwnds:
+        return None
+    from pywinauto import Desktop
+    return Desktop(backend="uia").window(handle=hwnds[0])
+
+def _play_buttons(window):
+    #[(name after "Play ", button, in your library?)]. Asking makes the app turn its accessibility on, which can take a moment
+    library=set()
+    for e in window.descendants():
+        if e.window_text()=="Your Library" and e.element_info.control_type not in ("Button", "Text", "Hyperlink", "Edit"): #a DataGrid today
+            library={b.window_text() for b in e.descendants(control_type="Button")}
+            break
+    out=[]
+    for b in window.descendants(control_type="Button"):
+        name=b.window_text() or ""
+        if name.startswith("Play ") and len(name)>5:
+            out.append((name[5:].strip(), b, name in library))
+    return out
+
+def _open(uri):
+    os.startfile(uri) #a spotify: link with only url-encoded words in it; windows hands it to the spotify app
+
+def spotify_app_play(kind, name, artist):
+    #plays it in the spotify app. Returns what it pressed play on, or None if it couldn't
+    import time as clock
+    if not spotify_app_installed():
+        return None
+    try:
+        import pywinauto  # noqa: F401
+    except ImportError:
+        return None
+    if kind=="liked" or LIKED_WORDS.match(norm(name or "")):
+        _open("spotify:collection:tracks")
+        want=lambda found: [b for n, b, lib in found if n=="Liked Songs" and not lib]
+        label="your liked songs"
+    else:
+        target=norm(name)
+        #your own playlists, podcasts and albums first (the library on the left), when the name matches well
+        window=_spotify_window()
+        if window is not None and not artist:
+            mine=[(similar(n, target), n, b) for n, b, lib in _play_buttons(window) if lib]
+            mine=[m for m in mine if m[0]>=0.8 or (len(target)>=4 and norm(m[1]).startswith(target))]
+            if mine:
+                score, n, b=max(mine, key=lambda m: m[0])
+                b.invoke()
+                return clean(n)
+        query=" ".join(w for w in (name, artist) if w)
+        before=[n for n, b, lib in _play_buttons(window) if not lib] if window is not None else []
+        _open("spotify:search:"+urllib.parse.quote(query[:100], safe=""))
+        clock.sleep(1) #let the search page replace the old one
+        def want(found):
+            names=[n for n, b, lib in found if not lib]
+            if names==before: #still the old page: never press one of its buttons
+                return []
+            return [b for n, b, lib in found if not lib and n!="Liked Songs"]
+        label=None
+    end=clock.monotonic()+15
+    while clock.monotonic()<end:
+        window=_spotify_window()
+        if window is not None:
+            found=_play_buttons(window)
+            hits=want(found)
+            if hits:
+                hits[0].invoke() #the top result
+                return label or clean(hits[0].window_text()[5:])
+        clock.sleep(0.7)
+    return None
+
 def play_anywhere(query, ctx):
     #navi's own music window if it can (no key needed), else youtube in your browser with the api key
     if ctx.browser_play:
@@ -689,6 +775,17 @@ def local_handle(action, arg, t, ctx):
     if action in ("play", "queue", "shuffle_play") and arg:
         kind, name, artist=parse_request(arg)
         query=" ".join(w for w in (name, artist) if w).strip() or arg
+        if spotify_app_installed():
+            try:
+                played=spotify_app_play(kind, name or arg, artist)
+            except Exception as e: #the app changed, or windows' accessibility had a hiccup
+                print("spotify app err;", type(e).__name__)
+                played=None
+            if played:
+                remember_app("spotify.exe")
+                ctx.say(f"Playing {played} in Spotify.")
+                poke()
+                return True
         if (ctx.browser_play or youtube_key()) and "spotify" not in t:
             play_anywhere(query, ctx)
         else:

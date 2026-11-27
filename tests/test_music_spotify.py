@@ -96,6 +96,7 @@ music.spotify_titles=lambda: [] #the real spotify app on this pc mustn't change 
 real_session=music.session_now_playing
 music.session_now_playing=lambda last=None: False #...nor windows' media controls (tested on their own below)
 music.session_control=lambda action: False
+music.spotify_app_play=lambda kind, name, artist: None #...nor the real spotify app's buttons
 
 #--- sign in -----------------------------------------------------------------------------------------------------
 def browser(code="CODE", state=None, path="/callback", tamper=None):
@@ -296,6 +297,21 @@ check("bad key is explained", "didn't accept the API key" in said[-1])
 os.environ["YOUTUBE_API_KEY"]="not a key&q=x"
 check("a malformed key is never sent", music.youtube_key()=="" and run("play hello on youtube") and "add a YouTube API key" in said[-1])
 os.environ["YOUTUBE_API_KEY"]=""
+
+#--- the spotify app's own play buttons (no premium) ----------------------------------------------------------------
+asked_app=[]
+def app_play(kind, name, artist):
+    asked_app.append((kind, name, artist))
+    return "your liked songs" if kind=="liked" else "Blinding Lights"
+music.spotify_app_play=app_play
+installed=music.spotify_app_installed
+music.spotify_app_installed=lambda: True
+said.clear()
+check("play my liked songs presses play on liked songs in the app", run("play my liked songs") and asked_app[-1][0]=="liked" and said[-1]=="Playing your liked songs in Spotify.")
+check("play a song by name in the app", run("play blinding lights by the weeknd") and asked_app[-1]==("song", "blinding lights", "the weeknd") and said[-1]=="Playing Blinding Lights in Spotify.")
+check("liked words", all(music.LIKED_WORDS.match(w) for w in ("liked", "my liked songs", "favorites", "my library")) and not music.LIKED_WORDS.match("liked by many"))
+music.spotify_app_play=lambda kind, name, artist: None
+music.spotify_app_installed=installed
 
 #--- navi's own music window ----------------------------------------------------------------------------------------
 asked=[]
